@@ -11,6 +11,13 @@ data class SourcePolicy(
 
 object SourceRegistry {
     val sources = listOf(
-        SourcePolicy("example-authorized-source", "https://example.com")
+        SourcePolicy(
+            id = "animesalt",
+            baseUrl = "https://animesalt.cx",
+            enabled = true,
+            authorizedForUse = false,
+            allowsAutomatedAccess = false,
+            allowsPlaybackIntegration = false
+        )
     )
 }
