@@ -99,9 +99,82 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     }
 }
 
-private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){val e=URLEncoder.encode(q,"UTF-8");val json=getJson(if(q.isBlank())"$API/top/anime?limit=12" else "$API/anime?q=$e&limit=12");parseAnime(json.optJSONArray("data")?:JSONArray())}
-private suspend fun fetchDetails(id:Int)=withContext(Dispatchers.IO){val d=getJson("$API/anime/$id").optJSONObject("data")?:throw IllegalStateException("Anime not found");Anime(id,d.optString("title","Unknown"),image(d)?:"",d.optString("score","—"),d.optString("episodes","?"),d.optString("type","Anime"),d.optString("synopsis",""))}
-private suspend fun fetchEpisodes(id:Int)=withContext(Dispatchers.IO){val d=getJson("$API/anime/$id/episodes?limit=100").optJSONArray("data")?:JSONArray();buildList{for(i in 0 until d.length()){val x=d.getJSONObject(i);add(Episode(x.optInt("mal_id",i+1),x.optString("title",""),x.optString("aired","")))}}}
-private fun parseAnime(a:JSONArray)=buildList{for(i in 0 until a.length()){val x=a.getJSONObject(i);val img=image(x)?:continue;add(Anime(x.optInt("mal_id"),x.optString("title","Unknown"),img,x.optString("score","—"),x.optString("episodes","?"),x.optString("type","Anime")))}} 
-private fun image(x:JSONObject):String?{val j=x.optJSONObject("images")?.optJSONObject("jpg")?:return null;return j.optString("large_image_url").ifBlank{j.optString("image_url")}.ifBlank{null}}
-private fun getJson(url:String):JSONObject{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="GET";c.connectTimeout=10000;c.readTimeout=10000;c.setRequestProperty("Accept","application/json");try{if(c.responseCode !in 200..299)throw IllegalStateException("API HTTP "+c.responseCode);return JSONObject(c.inputStream.bufferedReader().use{it.readText()})}finally{c.disconnect()}}
+private const val BASE_URL = "https://animesalt.cx"
+
+private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
+    if(q.isBlank()) return@withContext fetchHome()
+    val encoded=URLEncoder.encode(q,"UTF-8")
+    val doc=getHtml("$BASE_URL/?s=$encoded")
+    doc.select("#aa-movies li.series").mapNotNull { el ->
+        val link=el.selectFirst("a.lnk-blk")?.attr("href") ?: return@mapNotNull null
+        val id=link.trimEnd('/').substringAfterLast("/series/")
+        val title=el.selectFirst("h2.entry-title")?.text()?.trim().orEmpty()
+        val poster=posterFrom(el.selectFirst("img"))
+        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id)
+    }
+}
+
+private suspend fun fetchHome()=withContext(Dispatchers.IO){
+    val doc=getHtml(BASE_URL)
+    val items=doc.select("#aa-movies li.series, #aa-movies li.movie").mapNotNull { el ->
+        val link=el.selectFirst("a.lnk-blk")?.attr("href") ?: return@mapNotNull null
+        val id=link.trimEnd('/').substringAfterLast("/series/").substringAfterLast("/movies/")
+        val title=el.selectFirst("h2.entry-title")?.text()?.trim().orEmpty()
+        val poster=posterFrom(el.selectFirst("img"))
+        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id)
+    }
+    items.distinctBy { it.synopsis }.take(30)
+}
+
+private suspend fun fetchDetails(id:Int)=withContext(Dispatchers.IO){
+    throw IllegalStateException("Direct source IDs are loaded from search results; open an anime from Search.")
+}
+
+private suspend fun fetchEpisodes(id:Int)=withContext(Dispatchers.IO){
+    emptyList<Episode>()
+}
+
+private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
+    val doc=getHtml("$BASE_URL/series/$slug/")
+    val title=doc.selectFirst(".fg1 .entry-title")?.text()?.trim().orEmpty()
+    if(title.isBlank()) throw IllegalStateException("Anime not found")
+    val description=doc.selectFirst(".description")
+    val overview=description?.selectFirst("p")?.text()?.trim().orEmpty()
+    val language=description?.select("p")?.firstOrNull { it.text().contains("Language:") }?.text()?.substringAfter("Language:")?.trim().orEmpty()
+    val quality=description?.select("p")?.firstOrNull { it.text().contains("Quality:") }?.text()?.substringAfter("Quality:")?.trim().orEmpty()
+    val genres=doc.select(".genres a").map { it.text().trim() }.filter { it.isNotBlank() }
+    val year=doc.selectFirst(".year")?.text()?.trim().orEmpty()
+    val seasons=doc.selectFirst(".seasons")?.text()?.replace("Seasons","",ignoreCase=true)?.trim().orEmpty()
+    val episodes=doc.selectFirst(".entry-meta .episodes")?.text()?.replace("Episodes","",ignoreCase=true)?.trim().orEmpty()
+    val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
+    val poster=posterFrom(doc.selectFirst(".post-thumbnail img"))
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug)
+}
+
+private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
+    val doc=getHtml("$BASE_URL/episode/$slug-${season}x1/")
+    doc.select("#episode_by_temp li").mapNotNull { el ->
+        val raw=el.selectFirst(".num-epi")?.text()?.trim().orEmpty()
+        val parts=raw.split("x")
+        val ep=parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+        Episode(ep,el.selectFirst(".entry-title")?.text()?.trim().orEmpty(),el.selectFirst("img")?.attr("alt").orEmpty())
+    }
+}
+
+private fun getHtml(url:String):org.jsoup.nodes.Document{
+    return org.jsoup.Jsoup.connect(url)
+        .userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36")
+        .header("Accept","text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        .header("Accept-Language","en-US,en;q=0.9")
+        .referrer("https://toonstream.dad/")
+        .timeout(15000)
+        .get()
+}
+
+private fun posterFrom(img:org.jsoup.nodes.Element?):String{
+    if(img==null) return ""
+    var value=img.attr("data-src").ifBlank { img.attr("data-lazy-src") }
+        .ifBlank { img.attr("data-original") }.ifBlank { img.attr("src") }
+    if(value.startsWith("//")) value="https:$value"
+    return if(value.startsWith("data:image")) "" else value
+}
