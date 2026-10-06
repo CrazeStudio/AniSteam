@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import android.content.Context
 
 private const val SOURCE = "https://animesalt.cx"
 
@@ -85,6 +87,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 }
 
 @Composable private fun Details(slug:String,onBack:()->Unit) {
+    BackHandler(enabled=true){onBack()}
     val context=LocalContext.current
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingEpisode by remember{mutableStateOf<Episode?>(null)};var playerLoading by remember{mutableStateOf(false)};var playerError by remember{mutableStateOf<String?>(null)}
     LaunchedEffect(slug){
@@ -96,8 +99,9 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
         loading=true;error=null
         try{eps=fetchEpisodesBySlug(slug,season)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load episodes."}finally{loading=false}
     }
-    LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}; if(servers.isEmpty()) playerError="AnimeSalt did not expose a public player for this episode." else playingEpisode=ep.copy(servers=servers) } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to load AnimeSalt servers: ${e.message ?: "network error"}" } finally { playerLoading=false } }
+    LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}; if(servers.isEmpty()) playerError="AnimeSalt did not expose a public player for this episode." else {val ready=ep.copy(servers=servers);playingEpisode=ready;saveContinueWatching(context,ready)} } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to load AnimeSalt servers: ${e.message ?: "network error"}" } finally { playerLoading=false } }
     if(playingEpisode!=null){if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!){playingEpisode=null}};return}
+    BackHandler(enabled=playingEpisode!=null){playingEpisode=null}
     chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Check AnimeSalt and open its real embedded player.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
@@ -115,6 +119,9 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     }
 }
 
+
+private fun saveContinueWatching(context:Context,ep:Episode){context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putInt("number",ep.number).putString("title",ep.title).putString("url",ep.url).apply()}
+private fun loadContinueWatching(context:Context):Episode?{val p=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE);val u=p.getString("url",null)?:return null;return Episode(p.getInt("number",1),p.getString("title","Episode")?:"Episode","",u)}
 private const val BASE_URL = "https://animesalt.cx"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
