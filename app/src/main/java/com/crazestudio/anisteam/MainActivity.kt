@@ -778,6 +778,7 @@ private class AnimeSaltChromeClient(
 
         customView = view
         customViewCallback = callback
+        activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val content = activity.findViewById<FrameLayout>(android.R.id.content)
         view.setBackgroundColor(android.graphics.Color.BLACK)
@@ -812,6 +813,7 @@ private class AnimeSaltChromeClient(
     }
 
     override fun onHideCustomView() {
+        activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val view = customView ?: return
         val content = activity.findViewById<FrameLayout>(android.R.id.content)
 
