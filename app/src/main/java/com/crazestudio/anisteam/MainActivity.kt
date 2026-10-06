@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import kotlinx.coroutines.ensureActive
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -223,7 +224,10 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         Column(Modifier.fillMaxSize().background(Color.Black)){PlayerHeader(episode,onBack,{fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED});AndroidView(factory={ctx->PlayerView(ctx).apply{useController=true;setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)}},update={it.player=player},modifier=Modifier.fillMaxWidth().weight(1f));ServerPicker(episode.servers,selectedServer!!){selectedServer=it};EpisodeNav(previous,next,onEpisode,episode)}
     }else{
         val server=selectedServer!!
-        AndroidView(factory={ctx->android.webkit.WebView(ctx).apply{settings.javaScriptEnabled=true;settings.domStorageEnabled=true;settings.mediaPlaybackRequiresUserGesture=false;webViewClient=WebViewClient();webChromeClient=WebChromeClient();setBackgroundColor(android.graphics.Color.BLACK);loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))}},update={if(it.url!=server.url)it.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))},modifier=Modifier.fillMaxWidth().weight(1f))
+        Column(Modifier.fillMaxSize().background(Color.Black)){
+            AndroidView(factory={ctx->android.webkit.WebView(ctx).apply{settings.javaScriptEnabled=true;settings.domStorageEnabled=true;settings.mediaPlaybackRequiresUserGesture=false;webViewClient=WebViewClient();webChromeClient=WebChromeClient();setBackgroundColor(android.graphics.Color.BLACK);loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))}},update={if(it.url!=server.url)it.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))},modifier=Modifier.fillMaxWidth().weight(1f))
+            Column(Modifier.fillMaxWidth().background(Color(0xFF0D0D12))){PlayerHeader(episode,onBack,{fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED});ServerPicker(episode.servers,selectedServer!!){selectedServer=it};EpisodeNav(previous,next,onEpisode,episode)}
+        }
         Column(Modifier.fillMaxWidth().background(Color(0xFF0D0D12))){PlayerHeader(episode,onBack,{fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED});ServerPicker(episode.servers,selectedServer!!){selectedServer=it};EpisodeNav(previous,next,onEpisode,episode)}
     }
 }
