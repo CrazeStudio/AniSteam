@@ -238,17 +238,56 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
-    val pageUrl="$BASE_URL/episode/$slug-${season}x1/"
-    val doc=getHtml(pageUrl)
-    val playerUrl=doc.selectFirst("iframe[src]")?.absUrl("src").orEmpty()
-    val nodes=doc.select("#episode_by_temp li, a[href*=/episode/]")
-    nodes.mapNotNull { el ->
+    // AnimeSalt does not guarantee a /episode/<slug>-<season>x1/ page.
+    // Read the real season/post mapping from the series page and use AnimeSalt's
+    // own AJAX endpoint for seasons that are loaded dynamically.
+    val seriesUrl="$BASE_URL/series/$slug/"
+    val seriesDoc=getHtml(seriesUrl)
+    val seasonButton=seriesDoc.selectFirst(".season-btn[data-season=\"$season\"][data-post]")
+    val postId=seasonButton?.attr("data-post").orEmpty()
+
+    val episodeDoc=if(season==1 || postId.isBlank()){
+        seriesDoc
+    }else{
+        val ajaxUrl="$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$season&post=$postId"
+        getHtml(ajaxUrl)
+    }
+
+    parseEpisodeList(episodeDoc,slug,season)
+}
+
+private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int):List<Episode>{
+    val nodes=doc.select("#episode_by_temp li, #episode_by_temp_non_dubbed li, a[href*=/episode/]")
+    return nodes.mapNotNull { el ->
+        val link=when{
+            el.is("a[href*=/episode/]")->el
+            else->el.selectFirst("a[href*=/episode/], a.lnk-blk")
+        } ?: return@mapNotNull null
+        val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
+        if(href.isBlank()) return@mapNotNull null
+
+        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
+        val seasonEpisode=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
+        val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val urlEpisode=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
+        if(urlSeason!=null && urlSeason!=season) return@mapNotNull null
+
         val text=el.text().trim()
-        val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
-        val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
-        val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
-        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() },animeSlug=slug)
-    }.distinctBy{it.number}.sortedBy{it.number}
+        val displayed=el.selectFirst(".num-epi")?.text()?.trim().orEmpty()
+        val ep=urlEpisode
+            ?: displayed.filter{it.isDigit()}.toIntOrNull()
+            ?: Regex("\\b${season}x(\\d+)\\b").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: return@mapNotNull null
+        val title=(el.selectFirst(".entry-title,h2,h3")?.text()
+            ?: text.replace(Regex("\\b${season}x\\d+\\b"),"").trim()).trim()
+        Episode(
+            ep,
+            title,
+            el.selectFirst("img")?.attr("alt").orEmpty(),
+            href,
+            animeSlug=slug
+        )
+    }.distinctBy{it.url}.distinctBy{it.number}.sortedBy{it.number}
 }
 
 @Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit,onEpisode:(Episode)->Unit){
