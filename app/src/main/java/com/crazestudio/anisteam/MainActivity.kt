@@ -144,8 +144,16 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                 verticalAlignment=Alignment.CenterVertically
             ){
                 Column(Modifier.weight(1f)){
-                    Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold)
-                    Text("Your anime, beautifully.",color=Color(0xFF777783),fontSize=11.sp)
+                    Row(verticalAlignment=Alignment.CenterVertically){
+                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(colors.primary),contentAlignment=Alignment.Center){
+                            Text("A",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Black)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column{
+                            Text("ANISTEAM",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Black,letterSpacing=2.sp)
+                            Text("STREAM WITHOUT THE NOISE",color=Color(0xFF6F6F7B),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=1.2.sp)
+                        }
+                    }
                 }
                 TextButton(onClick=onSources){
                     Text("ANIMESALT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
@@ -158,9 +166,9 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                 OutlinedTextField(
                     value=q,
                     onValueChange={q=it},
-                    modifier=Modifier.fillMaxWidth(),
+                    modifier=Modifier.fillMaxWidth().height(58.dp),
                     singleLine=true,
-                    shape=RoundedCornerShape(16.dp),
+                    shape=RoundedCornerShape(18.dp),
                     colors=OutlinedTextFieldDefaults.colors(
                         focusedBorderColor=colors.primary,
                         unfocusedBorderColor=Color(0xFF24242D),
@@ -168,7 +176,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                         focusedContainerColor=Color(0xFF111117),
                         unfocusedContainerColor=Color(0xFF111117)
                     ),
-                    placeholder={Text("Search anime, movies and series",color=Color(0xFF666671))},
+                    placeholder={Text("Search anime...",color=Color(0xFF666671),fontSize=14.sp)},
                     trailingIcon={
                         if(q.isNotBlank()){
                             TextButton(onClick={submitted=q.trim()}){
@@ -200,7 +208,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                     Column(
                         Modifier.align(Alignment.BottomStart).padding(22.dp)
                     ){
-                        Text("FEATURED",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
+                        Text("SPOTLIGHT",color=Color.White.copy(alpha=.72f),fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=2.2.sp)
                         Spacer(Modifier.height(7.dp))
                         Text(featured.title,color=Color.White,fontSize=29.sp,fontWeight=FontWeight.ExtraBold,maxLines=2)
                         Spacer(Modifier.height(5.dp))
@@ -217,7 +225,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                         ){
                             Text("▶",color=Color.White,fontSize=12.sp)
                             Spacer(Modifier.width(7.dp))
-                            Text("View anime",color=Color.White,fontWeight=FontWeight.Bold,fontSize=12.sp)
+                            Text("WATCH NOW",color=Color.White,fontWeight=FontWeight.Bold,fontSize=11.sp,letterSpacing=1.sp)
                         }
                     }
                 }
