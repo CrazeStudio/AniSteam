@@ -375,129 +375,203 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
 }
 
 @Composable private fun Details(slug:String,onBack:()->Unit) {
-    val context=LocalContext.current; var anime by remember{mutableStateOf<Anime?>(null)};var eps by remember{mutableStateOf<List<Episode>>(emptyList())};var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingEpisode by remember{mutableStateOf<Episode?>(null)};var playerLoading by remember{mutableStateOf(false)};var playerError by remember{mutableStateOf<String?>(null)}
-    LaunchedEffect(slug){loading=true;error=null;eps=emptyList();season=1;try{anime=fetchDetailsBySlug(slug)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
-    LaunchedEffect(slug,anime,season){if(anime==null)return@LaunchedEffect;loading=true;error=null;try{eps=fetchEpisodesBySlug(slug,season)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load episodes."}finally{loading=false}}
-    LaunchedEffect(playingEpisode?.url){val ep=playingEpisode?:return@LaunchedEffect;playerLoading=true;playerError=null;try{val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)};kotlinx.coroutines.currentCoroutineContext().ensureActive();if(servers.isEmpty())playerError="No public player was found for this episode. Try again." else{val ready=ep.copy(servers=servers);playingEpisode=ready;saveContinueWatching(context,ready)}}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){playerError="Could not load this episode player: "+(e.message?:"network error")}finally{playerLoading=false}}
-    if(playingEpisode!=null){BackHandler(enabled=true){playingEpisode=null};if(playerLoading)Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator(color=colors.primary)}else if(playerError!=null)Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Player unavailable",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){TextButton(onClick={playerError=null;playingEpisode=playingEpisode?.copy()}){Text("Retry")};TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else SourcePlayer(playingEpisode!!,eps,onBack={playingEpisode=null},onEpisode={playingEpisode=it});return}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Open the real AnimeSalt server page for this episode. AniSteam embeds the server's own JWPlayer.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Open Player")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
+    val context=LocalContext.current
+    var anime by remember{mutableStateOf<Anime?>(null)}
+    var eps by remember{mutableStateOf<List<Episode>>(emptyList())}
+    var loading by remember{mutableStateOf(true)}
+    var error by remember{mutableStateOf<String?>(null)}
+    var chosen by remember{mutableStateOf<Episode?>(null)}
+    var season by remember{mutableIntStateOf(1)}
+    var playingEpisode by remember{mutableStateOf<Episode?>(null)}
+    var playerLoading by remember{mutableStateOf(false)}
+    var playerError by remember{mutableStateOf<String?>(null)}
+
+    LaunchedEffect(slug){
+        loading=true;error=null;eps=emptyList();season=1
+        try{anime=fetchDetailsBySlug(slug)}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){error=e.message?:"Unable to load details."}
+        finally{loading=false}
+    }
+    LaunchedEffect(slug,anime,season){
+        if(anime==null)return@LaunchedEffect
+        loading=true;error=null
+        try{eps=fetchEpisodesBySlug(slug,season)}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){error=e.message?:"Unable to load episodes."}
+        finally{loading=false}
+    }
+    LaunchedEffect(playingEpisode?.url){
+        val ep=playingEpisode?:return@LaunchedEffect
+        playerLoading=true;playerError=null
+        try{
+            val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if(servers.isEmpty()) playerError="No public player was found for this episode."
+            else{
+                val ready=ep.copy(servers=servers)
+                playingEpisode=ready
+                saveContinueWatching(context,ready)
+            }
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){playerError="Could not load this episode player: "+(e.message?:"network error")}
+        finally{playerLoading=false}
+    }
+
+    if(playingEpisode!=null){
+        BackHandler(enabled=true){playingEpisode=null}
+        if(playerLoading){
+            Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
+                CircularProgressIndicator(color=colors.primary,strokeWidth=2.5.dp)
+            }
+        }else if(playerError!=null){
+            Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){
+                Column(horizontalAlignment=Alignment.CenterHorizontally){
+                    Text("Player unavailable",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(10.dp))
+                    Text(playerError!!,color=Color.Gray)
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                        TextButton(onClick={playerError=null;playingEpisode=playingEpisode?.copy()}){Text("Retry")}
+                        TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}
+                    }
+                }
+            }
+        }else SourcePlayer(playingEpisode!!,eps,onBack={playingEpisode=null},onEpisode={playingEpisode=it})
+        return
+    }
+
+    chosen?.let{ep->
+        AlertDialog(
+            onDismissRequest={chosen=null},
+            shape=RoundedCornerShape(24.dp),
+            containerColor=Color(0xFF14141B),
+            title={Text("Episode "+ep.number,color=Color.White,fontWeight=FontWeight.ExtraBold)},
+            text={Text("Play this episode using AnimeSalt's original embedded JWPlayer.",color=Color(0xFF9D9DA8))},
+            confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("PLAY",color=colors.primary,fontWeight=FontWeight.Bold)}},
+            dismissButton={TextButton(onClick={chosen=null}){Text("CANCEL",color=Color(0xFF858590))}}
+        )
+    }
+
     Column(Modifier.fillMaxSize().background(Color(0xFF07070B))){
         Row(
             Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),
             verticalAlignment=Alignment.CenterVertically
         ){
             TextButton(onClick=onBack){
-                Text("‹",color=Color.White,fontSize=30.sp,fontWeight=FontWeight.Light)
+                Text("‹  BACK",color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold)
             }
             Spacer(Modifier.weight(1f))
-            Text("ANISTEAM",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
+            Text("ANISTEAM",color=Color(0xFF777783),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
         }
+
         when{
-            loading->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
+            loading && anime==null->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
                 CircularProgressIndicator(color=colors.primary,strokeWidth=2.5.dp)
             }
-            error!=null->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
-                Text(error!!,color=Color(0xFF9999A4))
+            error!=null && anime==null->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
+                Text(error!!,color=Color.LightGray)
             }
-            anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=35.dp)){
+            anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=42.dp)){
                 item{
                     Box(
                         Modifier.fillMaxWidth().height(430.dp)
                             .clip(RoundedCornerShape(bottomStart=30.dp,bottomEnd=30.dp))
                     ){
                         AsyncImage(anime!!.image,anime!!.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
-                        Box(Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(listOf(Color.Transparent,Color(0x22000000),Color(0xF507070B)))
-                        ))
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0x22000000),Color(0x55000000),Color(0xF507070B))
+                                )
+                            )
+                        )
                         Column(Modifier.align(Alignment.BottomStart).padding(22.dp)){
                             Text("ANIME",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
                             Spacer(Modifier.height(7.dp))
-                            Text(anime!!.title,color=Color.White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold,lineHeight=34.sp,maxLines=3)
-                            Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                                DetailPill(anime!!.type)
-                                DetailPill(anime!!.episodes+" EPS")
-                                if(anime!!.score.isNotBlank())DetailPill("★ "+anime!!.score)
-                            }
+                            Text(anime!!.title,color=Color.White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold,maxLines=3)
+                            Spacer(Modifier.height(7.dp))
+                            Text(
+                                anime!!.type+"  •  "+anime!!.episodes+" episodes  •  ★ "+anime!!.score,
+                                color=Color(0xFFD4D4DC),fontSize=11.sp
+                            )
                         }
                     }
                 }
                 item{
-                    Column(Modifier.padding(horizontal=20.dp,vertical=22.dp)){
-                        Text("ABOUT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            anime!!.synopsis.ifBlank{"No synopsis available."},
-                            color=Color(0xFFB8B8C2),fontSize=13.sp,lineHeight=20.sp
-                        )
-                        Spacer(Modifier.height(25.dp))
-                        Row(verticalAlignment=Alignment.CenterVertically){
-                            Column(Modifier.weight(1f)){
-                                Text("EPISODES",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.ExtraBold)
-                                Text(eps.size.toString()+" available",color=Color(0xFF777783),fontSize=10.sp)
+                    Column(Modifier.padding(horizontal=18.dp,vertical=20.dp)){
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                            Surface(color=Color(0xFF16161E),shape=RoundedCornerShape(10.dp)){
+                                Text(anime!!.type,color=Color(0xFFB9B9C3),fontSize=10.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=11.dp,vertical=7.dp))
                             }
-                            if(anime!!.seasons>1)Text(anime!!.seasons.toString()+" seasons",color=Color(0xFF777783),fontSize=11.sp)
-                        }
-                        if(anime!!.seasons>1){
-                            Spacer(Modifier.height(12.dp))
-                            LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                                items(anime!!.seasons){index->
-                                    val s=index+1
-                                    val selected=season==s
-                                    val chipColor by animateColorAsState(
-                                        if(selected)colors.primary else Color(0xFF14141B),
-                                        animationSpec=tween(220),label="detailSeason"
-                                    )
-                                    Text(
-                                        "Season "+s,
-                                        color=if(selected)Color.White else Color(0xFF898994),
-                                        fontSize=11.sp,fontWeight=FontWeight.Bold,
-                                        modifier=Modifier.clip(RoundedCornerShape(12.dp))
-                                            .background(chipColor)
-                                            .clickable{season=s}
-                                            .padding(horizontal=15.dp,vertical=10.dp)
-                                    )
+                            Surface(color=Color(0xFF16161E),shape=RoundedCornerShape(10.dp)){
+                                Text(anime!!.episodes+" EP",color=Color(0xFFB9B9C3),fontSize=10.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=11.dp,vertical=7.dp))
+                            }
+                            if(anime!!.score.isNotBlank()){
+                                Surface(color=Color(0xFF16161E),shape=RoundedCornerShape(10.dp)){
+                                    Text("★ "+anime!!.score,color=colors.secondary,fontSize=10.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=11.dp,vertical=7.dp))
                                 }
                             }
                         }
+                        Spacer(Modifier.height(22.dp))
+                        Text("ABOUT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
+                        Spacer(Modifier.height(7.dp))
+                        Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB2B2BC),fontSize=13.sp,lineHeight=20.sp)
+                        Spacer(Modifier.height(26.dp))
+                        Row(verticalAlignment=Alignment.CenterVertically){
+                            Column(Modifier.weight(1f)){
+                                Text("Episodes",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.ExtraBold)
+                                Text("Choose an episode to start watching",color=Color(0xFF777783),fontSize=10.sp)
+                            }
+                            Text(eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        if(anime!!.seasons>1){
+                            LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
+                                items((1..anime!!.seasons).toList()){s->
+                                    val selectedSeason=season==s
+                                    val chipColor by animateColorAsState(if(selectedSeason)colors.primary else Color(0xFF14141B),animationSpec=tween(220),label="seasonChip")
+                                    Text(
+                                        "Season "+s,
+                                        color=if(selectedSeason)Color.White else Color(0xFF858590),
+                                        fontWeight=FontWeight.Bold,fontSize=11.sp,
+                                        modifier=Modifier.clip(RoundedCornerShape(12.dp)).background(chipColor)
+                                            .clickable{season=s}.padding(horizontal=14.dp,vertical=9.dp)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(13.dp))
+                        }
                     }
                 }
-                items(eps,key={it.url}){ep->
-                    Row(
-                        Modifier.padding(horizontal=18.dp,vertical=4.dp).fillMaxWidth()
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(Color(0xFF111117))
-                            .clickable{chosen=ep}
-                            .padding(horizontal=13.dp,vertical=12.dp),
-                        verticalAlignment=Alignment.CenterVertically
-                    ){
-                        Box(
-                            Modifier.size(39.dp).clip(RoundedCornerShape(11.dp))
-                                .background(Color(0xFF1A1A23)),
-                            contentAlignment=Alignment.Center
+                if(loading){
+                    item{
+                        Box(Modifier.fillMaxWidth().height(100.dp),contentAlignment=Alignment.Center){
+                            CircularProgressIndicator(color=colors.primary,strokeWidth=2.dp)
+                        }
+                    }
+                }else{
+                    items(eps,key={it.url}){ep->
+                        Row(
+                            Modifier.padding(horizontal=18.dp,vertical=4.dp).fillMaxWidth()
+                                .clip(RoundedCornerShape(15.dp)).background(Color(0xFF111117))
+                                .clickable{chosen=ep}.padding(horizontal=13.dp,vertical=12.dp),
+                            verticalAlignment=Alignment.CenterVertically
                         ){
-                            Text(ep.number.toString(),color=colors.secondary,fontSize=12.sp,fontWeight=FontWeight.ExtraBold)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)){
-                            Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=13.sp,maxLines=1)
-                            if(ep.aired.isNotBlank())Text(ep.aired,color=Color(0xFF6F6F7A),fontSize=9.sp)
-                        }
-                        Box(Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(Color(0xFF191923)),contentAlignment=Alignment.Center){
-                            Text("▶",color=colors.primary,fontSize=10.sp)
+                            Text(ep.number.toString().padStart(2,'0'),color=colors.primary,fontSize=12.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.width(42.dp))
+                            Column(Modifier.weight(1f)){
+                                Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=13.sp,maxLines=2)
+                                if(ep.aired.isNotBlank())Text(ep.aired,color=Color(0xFF70707B),fontSize=9.sp)
+                            }
+                            Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B1B24)),contentAlignment=Alignment.Center){
+                                Text("▶",color=colors.primary,fontSize=10.sp)
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
-@Composable private fun DetailPill(text:String){
-    Text(
-        text,color=Color(0xFFE7E7EC),fontSize=9.sp,fontWeight=FontWeight.Bold,
-        modifier=Modifier.clip(RoundedCornerShape(9.dp)).background(Color(0x55181820))
-            .padding(horizontal=9.dp,vertical=6.dp)
-    )
 }
 
 private fun saveContinueWatching(context:Context,ep:Episode){
