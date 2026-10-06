@@ -26,6 +26,4 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jsoup:jsoup:1.18.3")
-    implementation("androidx.media3:media3-exoplayer:1.8.0")
-    implementation("androidx.media3:media3-ui:1.8.0")
 }
