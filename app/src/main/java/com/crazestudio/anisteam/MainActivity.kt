@@ -381,22 +381,22 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     var loading by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
     var chosen by remember{mutableStateOf<Episode?>(null)}
-    var season by remember{mutableIntStateOf(1)}
+    
     var playingEpisode by remember{mutableStateOf<Episode?>(null)}
     var playerLoading by remember{mutableStateOf(false)}
     var playerError by remember{mutableStateOf<String?>(null)}
 
     LaunchedEffect(slug){
-        loading=true;error=null;eps=emptyList();season=1
+        loading=true;error=null;eps=emptyList()
         try{anime=fetchDetailsBySlug(slug)}
         catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){error=e.message?:"Unable to load details."}
         finally{loading=false}
     }
-    LaunchedEffect(slug,anime,season){
+    LaunchedEffect(slug,anime){
         if(anime==null)return@LaunchedEffect
         loading=true;error=null
-        try{eps=fetchEpisodesBySlug(slug,season)}
+        try{eps=fetchEpisodesBySlug(slug,anime!!.seasons)}
         catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){error=e.message?:"Unable to load episodes."}
         finally{loading=false}
@@ -526,21 +526,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                             Text(eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
                         }
                         Spacer(Modifier.height(12.dp))
-                        if(anime!!.seasons>1){
-                            LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                                items((1..anime!!.seasons).toList()){s->
-                                    val selectedSeason=season==s
-                                    val chipColor by animateColorAsState(if(selectedSeason)colors.primary else Color(0xFF14141B),animationSpec=tween(220),label="seasonChip")
-                                    Text(
-                                        "Season "+s,
-                                        color=if(selectedSeason)Color.White else Color(0xFF858590),
-                                        fontWeight=FontWeight.Bold,fontSize=11.sp,
-                                        modifier=Modifier.clip(RoundedCornerShape(12.dp)).background(chipColor)
-                                            .clickable{season=s}.padding(horizontal=14.dp,vertical=9.dp)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(13.dp))
+
                         }
                     }
                 }
