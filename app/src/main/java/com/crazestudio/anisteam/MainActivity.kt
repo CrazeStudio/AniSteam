@@ -664,6 +664,7 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
     val seriesUrl="$BASE_URL/series/$slug/"
     val seriesDoc=getHtml(seriesUrl)
+
     fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
         if(targetSeason==1) return seriesDoc
         val button=seriesDoc.selectFirst(".season-btn[data-season=\"$targetSeason\"][data-post]")
@@ -671,20 +672,27 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         if(postId.isBlank()) return org.jsoup.Jsoup.parse("")
         return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$targetSeason&post=$postId")
     }
-    val currentDoc=seasonDocument(season)
-    // AnimeSalt can expose the same season through multiple episode lists
-    // (for example dubbed/non-dubbed), so counting DOM entries can double-count.
-    // Use the highest real season-local episode number instead.
-    val previousSeasonCount=(1 until season).sumOf { previousSeason ->
-        parseEpisodeList(seasonDocument(previousSeason),slug,previousSeason)
-            .maxOfOrNull { it.number } ?: 0
+
+    // AniSteam presents the anime as one continuous episode list.
+    // Seasons are an AnimeSalt routing detail only; the visible episode
+    // number stays continuous across the whole show.
+    val all=mutableListOf<Episode>()
+    var offset=0
+    for(s in 1..season){
+        val local=parseEpisodeList(seasonDocument(s),slug,s,0)
+        val unique=local.distinctBy { it.number }.sortedBy { it.number }
+        if(s==season){
+            all += unique.map { it.copy(number=it.number+offset) }
+        } else {
+            offset += unique.maxOfOrNull { it.number } ?: 0
+        }
     }
-    parseEpisodeList(currentDoc,slug,season,previousSeasonCount)
+    all.sortedBy { it.number }
 }
+
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
-    // AnimeSalt can render multiple episode lists (dubbed/non-dubbed).
-    // Treat the episode URL as the source of truth and keep exactly one
-    // canonical entry for each season-local episode number.
+    // AnimeSalt's season x episode URL is the source of truth.
+    // Keep the real URL intact while exposing a continuous episode number.
     val candidates=doc.select("a[href*=/episode/]").mapNotNull { link ->
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
         if(href.isBlank()) return@mapNotNull null
@@ -715,7 +723,7 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
     }
 
     return candidates
-        .groupBy{it.number}
+        .groupBy{it.url}
         .mapNotNull{(_,items)->items.firstOrNull()}
         .sortedBy{it.number}
 }
