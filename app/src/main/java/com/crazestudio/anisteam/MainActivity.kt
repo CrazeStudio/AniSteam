@@ -319,50 +319,75 @@ private class AnimeSaltChromeClient(
     private var customView: View? = null
     private var customViewCallback: CustomViewCallback? = null
 
-    fun exitFullscreen() { onHideCustomView() }
+    fun exitFullscreen() {
+        if (customView != null) onHideCustomView()
+    }
 
     override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
         if (view == null) return
+
+        // JWPlayer can issue fullscreen more than once while its controls animate.
+        // Keep the first custom view alive instead of replacing the video surface.
         if (customView != null) {
             callback?.onCustomViewHidden()
             return
         }
+
         customView = view
         customViewCallback = callback
-        val decor = activity.window.decorView as FrameLayout
-        decor.addView(view, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ))
+
+        val content = activity.findViewById<FrameLayout>(android.R.id.content)
+        view.setBackgroundColor(android.graphics.Color.BLACK)
+        content.addView(
+            view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        view.bringToFront()
+
         activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+
+        // Do not recreate/reload the WebView while JWPlayer is entering fullscreen.
+        // The existing video surface remains the active player surface.
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            decor.windowInsetsController?.hide(android.view.WindowInsets.Type.systemBars())
-            decor.windowInsetsController?.systemBarsBehavior =
+            content.windowInsetsController?.hide(android.view.WindowInsets.Type.systemBars())
+            content.windowInsetsController?.systemBarsBehavior =
                 android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
             @Suppress("DEPRECATION")
-            decor.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            content.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         }
+
         onFullscreenChanged(true)
     }
 
     override fun onHideCustomView() {
         val view = customView ?: return
-        val decor = activity.window.decorView as FrameLayout
-        decor.removeView(view)
+        val content = activity.findViewById<FrameLayout>(android.R.id.content)
+
+        content.removeView(view)
         customView = null
+
         customViewCallback?.onCustomViewHidden()
         customViewCallback = null
+
         activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            decor.windowInsetsController?.show(android.view.WindowInsets.Type.systemBars())
+            content.windowInsetsController?.show(android.view.WindowInsets.Type.systemBars())
         } else {
             @Suppress("DEPRECATION")
-            decor.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+            content.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
         }
+
         onFullscreenChanged(false)
     }
 }
