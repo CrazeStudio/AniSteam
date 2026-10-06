@@ -535,9 +535,6 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         }
                         Spacer(Modifier.height(12.dp))
 
-                        }
-                    }
-                }
                 if(loading){
                     item{
                         Box(Modifier.fillMaxWidth().height(100.dp),contentAlignment=Alignment.Center){
