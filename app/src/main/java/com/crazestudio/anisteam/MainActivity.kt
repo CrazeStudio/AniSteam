@@ -43,7 +43,7 @@ private const val SOURCE = "https://animesalt.cx"
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class PlayerServer(val name:String,val url:String)
-data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="",val servers:List<PlayerServer> = emptyList())
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -64,10 +64,10 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 @Composable private fun Home(onOpen:(String)->Unit, onSources:()->Unit) {
     var q by remember { mutableStateOf("") }; var submitted by remember { mutableStateOf("") }
-    var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
+    var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; val continueWatching=remember{loadContinueWatching(LocalContext.current)}; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(submitted) { loading=true;error=null;try{data=fetchAnime(submitted)}catch(e:Exception){error=e.message?:"Unable to load anime."}finally{loading=false} }
     Column(Modifier.fillMaxSize().background(colors.background)) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(18.dp)) {\n            if(continueWatching!=null && continueWatching.animeSlug.isNotBlank()){Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF17171D)).clickable{onOpen(continueWatching.animeSlug)}.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("Continue Watching",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${continueWatching.number} • ${continueWatching.title}",color=Color.Gray,fontSize=12.sp)};Text("▶",color=colors.primary,fontSize=20.sp)}}\n            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment=Alignment.CenterVertically){Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));TextButton(onClick=onSources){Text("SOURCES",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,placeholder={Text("Search anime...",color=Color.Gray)},trailingIcon={if(q.isNotBlank())TextButton({submitted=q.trim()}){Text("Search")}})
@@ -100,7 +100,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
         try{eps=fetchEpisodesBySlug(slug,season)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load episodes."}finally{loading=false}
     }
     LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}; if(servers.isEmpty()) playerError="AnimeSalt did not expose a public player for this episode." else {val ready=ep.copy(servers=servers);playingEpisode=ready;saveContinueWatching(context,ready)} } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to load AnimeSalt servers: ${e.message ?: "network error"}" } finally { playerLoading=false } }
-    if(playingEpisode!=null){BackHandler(enabled=true){playingEpisode=null};if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!,eps){playingEpisode=null}};return}
+    if(playingEpisode!=null){BackHandler(enabled=true){playingEpisode=null};if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!,eps,onBack={playingEpisode=null},onEpisode={playingEpisode=it})};return}
     chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Open this episode in AniSteam Player. Playback uses a publicly exposed media URL when AnimeSalt provides one.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
@@ -119,8 +119,8 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 }
 
 
-private fun saveContinueWatching(context:Context,ep:Episode){context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putInt("number",ep.number).putString("title",ep.title).putString("url",ep.url).apply()}
-private fun loadContinueWatching(context:Context):Episode?{val p=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE);val u=p.getString("url",null)?:return null;return Episode(p.getInt("number",1),p.getString("title","Episode")?:"Episode","",u)}
+private fun saveContinueWatching(context:Context,ep:Episode){context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putInt("number",ep.number).putString("title",ep.title).putString("url",ep.url).putString("slug",ep.animeSlug).apply()}
+private fun loadContinueWatching(context:Context):Episode?{val p=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE);val u=p.getString("url",null)?:return null;return Episode(p.getInt("number",1),p.getString("title","Episode")?:"Episode","",u,animeSlug=p.getString("slug","")?:"")}
 private const val BASE_URL = "https://animesalt.cx"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
@@ -185,11 +185,11 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
         val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
-        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() })
+        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() },animeSlug=slug)
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
-@Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit){
+@Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit,onEpisode:(Episode)->Unit){
     val context=LocalContext.current
     val activity=context as? ComponentActivity
     val direct=episode.servers.firstOrNull{isDirectMediaUrl(it.url)}
@@ -210,7 +210,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     }
     val player=remember(direct.url){
         ExoPlayer.Builder(context).build().apply{
-            setMediaItem(MediaItem.fromUri(direct.url));prepare();playWhenReady=true
+            setMediaItem(MediaItem.fromUri(direct.url));prepare();seekTo(loadWatchPosition(context,episode.url));playWhenReady=true
         }
     }
     DisposableEffect(player,direct.url){
@@ -218,7 +218,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
             override fun onPlayerError(error:PlaybackException){failed=error.message?:"Playback error"}
         }
         player.addListener(listener)
-        onDispose{player.removeListener(listener);player.release();if(fullscreen)activity?.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}
+        onDispose{saveWatchPosition(context,episode.url,player.currentPosition);player.removeListener(listener);player.release();if(fullscreen)activity?.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}
     }
     Column(Modifier.fillMaxSize().background(Color.Black)){
         Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
@@ -229,14 +229,14 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         AndroidView(factory={ctx->PlayerView(ctx).apply{useController=true;setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)}},update={view->view.player=player},modifier=Modifier.fillMaxWidth().weight(1f))
         if(failed!=null){Text(failed!!,color=Color(0xFFFF8A8A),modifier=Modifier.padding(10.dp))}
         Row(Modifier.fillMaxWidth().padding(8.dp),horizontalArrangement=Arrangement.SpaceEvenly){
-            TextButton(onClick={previous?.let{onBack()}},enabled=previous!=null){Text("Previous")}
+            TextButton(onClick={previous?.let{onEpisode(it)}},enabled=previous!=null){Text("Previous")}
             Text("EP ${episode.number}",color=Color.White,modifier=Modifier.padding(top=12.dp))
-            TextButton(onClick={next?.let{onBack()}},enabled=next!=null){Text("Next")}
+            TextButton(onClick={next?.let{onEpisode(it)}},enabled=next!=null){Text("Next")}
         }
     }
 }
 
-private fun isDirectMediaUrl(url:String):Boolean{
+private fun loadWatchPosition(context:Context,url:String):Long=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).getLong("pos_"+url.hashCode(),0L)\nprivate fun saveWatchPosition(context:Context,url:String,position:Long){if(url.isNotBlank())context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putLong("pos_"+url.hashCode(),position.coerceAtLeast(0L)).apply()}\nprivate fun isDirectMediaUrl(url:String):Boolean{
     val u=url.substringBefore('?').lowercase()
     return u.endsWith(".m3u8")||u.endsWith(".mp4")||u.endsWith(".webm")||u.endsWith(".mpd")
 }
