@@ -139,18 +139,18 @@ private suspend fun fetchHome()=withContext(Dispatchers.IO){
 
 private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val doc=getHtml("$BASE_URL/series/$slug/")
-    val title=doc.selectFirst(".fg1 .entry-title")?.text()?.trim().orEmpty()
+    val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
     if(title.isBlank()) throw IllegalStateException("Anime not found")
-    val description=doc.selectFirst(".description")
+    val description=doc.selectFirst(".description, .desc, [class*=description]")
     val overview=description?.selectFirst("p")?.text()?.trim().orEmpty()
     val language=description?.select("p")?.firstOrNull { it.text().contains("Language:") }?.text()?.substringAfter("Language:")?.trim().orEmpty()
     val quality=description?.select("p")?.firstOrNull { it.text().contains("Quality:") }?.text()?.substringAfter("Quality:")?.trim().orEmpty()
-    val genres=doc.select(".genres a").map { it.text().trim() }.filter { it.isNotBlank() }
+    val genres=doc.select(".genres a, [class*=genre] a").map { it.text().trim() }.filter { it.isNotBlank() }
     val year=doc.selectFirst(".year")?.text()?.trim().orEmpty()
     val seasons=doc.selectFirst(".seasons")?.text()?.replace("Seasons","",ignoreCase=true)?.trim().orEmpty()
     val episodes=doc.selectFirst(".entry-meta .episodes")?.text()?.replace("Episodes","",ignoreCase=true)?.trim().orEmpty()
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
-    val poster=posterFrom(doc.selectFirst(".post-thumbnail img"))
+    val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
     Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt")
 }
 
