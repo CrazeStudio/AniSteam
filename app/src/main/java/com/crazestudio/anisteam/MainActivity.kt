@@ -657,31 +657,45 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     val seriesUrl="$BASE_URL/series/$slug/"
     val seriesDoc=getHtml(seriesUrl)
 
+    // AnimeSalt owns the season grouping. AniSteam follows every AnimeSalt
+    // season and keeps one continuous visible episode number.
+    val seasonButtons=seriesDoc.select(".season-btn[data-season][data-post]")
+        .mapNotNull { button ->
+            val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
+            val post=button.attr("data-post").trim()
+            if(post.isBlank()) return@mapNotNull null
+            Triple(number,post,button.text().replace(Regex("\\s+")," ").trim())
+        }
+        .distinctBy { it.first }
+        .sortedBy { it.first }
+
     fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
         if(targetSeason==1) return seriesDoc
-        val button=seriesDoc.selectFirst(".season-btn[data-season=\"$targetSeason\"][data-post]")
-        val postId=button?.attr("data-post").orEmpty()
-        if(postId.isBlank()) return org.jsoup.Jsoup.parse("")
-        return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$targetSeason&post=$postId")
+        val button=seasonButtons.firstOrNull{it.first==targetSeason} ?: return org.jsoup.Jsoup.parse("")
+        return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season="+button.first+"&post="+button.second)
     }
 
-    // AniSteam presents the anime as one continuous episode list.
-    // Seasons are an AnimeSalt routing detail only; the visible episode
-    // number stays continuous across the whole show.
     val all=mutableListOf<Episode>()
-    var offset=0
-    for(s in 1..season){
-        val local=parseEpisodeList(seasonDocument(s),slug,s,0)
-        val unique=local.distinctBy { it.number }.sortedBy { it.number }
-        if(s==season){
-            all += unique.map { it.copy(number=it.number+offset) }
-        } else {
-            offset += unique.maxOfOrNull { it.number } ?: 0
-        }
-    }
-    all.sortedBy { it.number }
-}
+    var nextGlobalNumber=1
+    val maxSeason=if(seasonButtons.isEmpty()) season else minOf(season,seasonButtons.maxOf{it.first})
 
+    for(s in 1..maxSeason){
+        val local=parseEpisodeList(seasonDocument(s),slug,s,0)
+            .distinctBy { it.url }
+            .sortedBy { it.number }
+        if(local.isEmpty()) continue
+
+        // AnimeSalt can reset the URL episode number at every season
+        // (S2E1, S3E1, ...). The URL stays untouched; only AniSteam's
+        // displayed number becomes continuous (1..N).
+        local.forEachIndexed { index, ep ->
+            all += ep.copy(number=nextGlobalNumber+index)
+        }
+        nextGlobalNumber += local.size
+    }
+
+    all.distinctBy { it.url }.sortedBy { it.number }
+}
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
     // AnimeSalt's season x episode URL is the source of truth.
     // Keep the real URL intact while exposing a continuous episode number.
