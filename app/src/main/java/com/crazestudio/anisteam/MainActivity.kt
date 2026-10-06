@@ -39,7 +39,8 @@ private const val SOURCE = "https://animesalt.cx"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
-data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="")
+data class PlayerServer(val name:String,val url:String)
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="",val servers:List<PlayerServer> = emptyList())
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -87,9 +88,9 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     val context=LocalContext.current
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingEpisode by remember{mutableStateOf<Episode?>(null)};var playerLoading by remember{mutableStateOf(false)};var playerError by remember{mutableStateOf<String?>(null)}
     LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){if(e !is kotlinx.coroutines.CancellationException) error=e.message?:"Unable to load details."}finally{loading=false}}
-    LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val ok=withContext(Dispatchers.IO){checkEpisodeAvailable(ep.url)}; if(!ok) playerError="AnimeSalt did not expose a playable iframe for this episode." } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to check AnimeSalt: ${e.message ?: "network error"}" } finally { playerLoading=false } }
+    LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}; if(servers.isEmpty()) playerError="AnimeSalt did not expose a public player for this episode." else playingEpisode=ep.copy(servers=servers) } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to load AnimeSalt servers: ${e.message ?: "network error"}" } finally { playerLoading=false } }
     LaunchedEffect(season){ if(season==1 && anime==null) return@LaunchedEffect; try { loading=true; error=null; eps=fetchEpisodesBySlug(slug,season) } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ error=e.message ?: "Unable to load episodes." } finally { loading=false } }
-    if(playingEpisode!=null){if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!.url){playingEpisode=null}};return}
+    if(playingEpisode!=null){if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!){playingEpisode=null}};return}
     chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Check AnimeSalt and open its real embedded player.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
@@ -175,50 +176,24 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
-private fun checkEpisodeAvailable(url:String):Boolean{ return try{ getHtml(url).selectFirst("iframe[src]") != null }catch(_:Exception){ false } }
-
-@Composable private fun SourcePlayer(url:String,onBack:()->Unit){
-    var failed by remember(url){mutableStateOf<String?>(null)}
+@Composable private fun SourcePlayer(episode:Episode,onBack:()->Unit){
+    var selected by remember(episode){mutableStateOf(0)}
+    val server=episode.servers.getOrNull(selected)
+    var failed by remember(server?.url){mutableStateOf<String?>(null)}
     Column(Modifier.fillMaxSize().background(Color.Black)){
-        Row(Modifier.fillMaxWidth().padding(6.dp),verticalAlignment=Alignment.CenterVertically){
-            TextButton(onClick=onBack){Text("‹ Back",color=Color.White)}
-            Text("AnimeSalt Player",color=Color.White,fontWeight=FontWeight.Bold)
-        }
-        if(failed!=null){
-            Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){
-                Text("Player failed to load",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text(failed!!,color=Color.LightGray)
-                Spacer(Modifier.height(16.dp))
-                TextButton(onClick={failed=null}){Text("Retry")}
-            }
-        }else{
-            AndroidView(factory={context->
-                android.webkit.WebView(context).apply{
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    settings.javaScriptEnabled=true
-                    settings.domStorageEnabled=true
-                    settings.databaseEnabled=true
-                    settings.mediaPlaybackRequiresUserGesture=false
-                    settings.loadsImagesAutomatically=true
-                    settings.allowFileAccess=true
-                    settings.allowContentAccess=true
-                    settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
-                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this,true)
-                    webViewClient=object:android.webkit.WebViewClient(){
-                        override fun onReceivedError(view:android.webkit.WebView,request:android.webkit.WebResourceRequest,error:android.webkit.WebResourceError){
-                            if(request.isForMainFrame) failed=error.description?.toString() ?: "Network error"
-                        }
-                    }
-                    webChromeClient=android.webkit.WebChromeClient()
-                    loadUrl(url,mapOf("Referer" to "$BASE_URL/"))
-                }
-            },modifier=Modifier.fillMaxSize())
-        }
+        Row(Modifier.fillMaxWidth().padding(6.dp),verticalAlignment=Alignment.CenterVertically){TextButton(onClick=onBack){Text("‹ Back",color=Color.White)};Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number}",color=Color.Gray,fontSize=11.sp)}}
+        if(episode.servers.size>1){Row(Modifier.fillMaxWidth().padding(horizontal=10.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){episode.servers.forEachIndexed{index,s->TextButton(onClick={selected=index;failed=null},enabled=selected!=index){Text(s.name,color=if(selected==index)colors.secondary else Color.White,fontWeight=FontWeight.Bold)}}}}
+        if(server==null){Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){Text("No public player server was found.",color=Color.LightGray)}}
+        else if(failed!=null){Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){Text("Player failed to load",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Text(failed!!,color=Color.LightGray);Spacer(Modifier.height(16.dp));TextButton(onClick={failed=null}){Text("Retry")}}}
+        else{AndroidView(factory={context->android.webkit.WebView(context).apply{setBackgroundColor(android.graphics.Color.BLACK);settings.javaScriptEnabled=true;settings.domStorageEnabled=true;settings.databaseEnabled=true;settings.mediaPlaybackRequiresUserGesture=false;settings.loadsImagesAutomatically=true;settings.allowFileAccess=true;settings.allowContentAccess=true;settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW;android.webkit.CookieManager.getInstance().setAcceptCookie(true);android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this,true);webViewClient=object:android.webkit.WebViewClient(){override fun onReceivedError(view:android.webkit.WebView,request:android.webkit.WebResourceRequest,error:android.webkit.WebResourceError){if(request.isForMainFrame)failed=error.description?.toString() ?: "Network error"}};webChromeClient=android.webkit.WebChromeClient();loadUrl(server.url,mapOf("Referer" to episode.url.ifBlank{"https://animesalt.cx/"}))}},update={webView->if(webView.url!=server.url)webView.loadUrl(server.url,mapOf("Referer" to episode.url.ifBlank{"https://animesalt.cx/"}))},modifier=Modifier.fillMaxSize())}
     }
 }
 
+private fun fetchPlayerServers(url:String):List<PlayerServer>{
+    val doc=getHtml(url);val result=mutableListOf<PlayerServer>()
+    val iframe=doc.selectFirst("iframe[src]")?.absUrl("src").orEmpty();if(iframe.isNotBlank())result.add(PlayerServer("Default",iframe))
+    listOf("MyStream","Abyss").forEach{label->doc.select("a,button,li,div").filter{it.text().trim().equals(label,ignoreCase=true)}.forEach{el->val target=listOf("data-src","data-url","data-embed","href").asSequence().map{el.attr(it)}.firstOrNull{it.isNotBlank()}.orEmpty();if(target.isNotBlank()){val absolute=el.absUrl("href").ifBlank{target};if(absolute.isNotBlank()&&result.none{it.url==absolute})result.add(PlayerServer(label,absolute))}}};return result.distinctBy{it.url}
+}
 private fun getHtml(url:String):org.jsoup.nodes.Document{
     return org.jsoup.Jsoup.connect(url)
         .userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36")
