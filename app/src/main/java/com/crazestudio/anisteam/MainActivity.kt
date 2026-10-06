@@ -31,10 +31,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.webkit.WebChromeClient
 import android.webkit.WebViewClient
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,7 +47,7 @@ private const val SOURCE = "https://animesalt.cx"
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class PlayerServer(val name:String,val url:String)
-data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -361,19 +357,15 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
 @Composable private fun PlayerHeader(episode:Episode,onBack:()->Unit,onFullscreen:()->Unit){Row(Modifier.fillMaxWidth().background(Color(0xFF0D0D12)).padding(horizontal=8.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically){TextButton(onClick=onBack){Text("‹ Back",color=Color.White)};Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number} • ${episode.title.ifBlank{"AnimeSalt"}}",color=Color.Gray,fontSize=11.sp,maxLines=1)};TextButton(onClick=onFullscreen){Text("FULL",color=Color.White,fontSize=11.sp)}}}
 @Composable private fun ServerPicker(servers:List<PlayerServer>,selected:PlayerServer,onSelect:(PlayerServer)->Unit){if(servers.size>1)Row(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=7.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)){servers.forEachIndexed{index,server->Text(server.name.ifBlank{"Server ${index+1}"},modifier=Modifier.clip(RoundedCornerShape(20.dp)).background(if(server.url==selected.url)colors.primary else Color(0xFF202027)).clickable{onSelect(server)}.padding(horizontal=14.dp,vertical=8.dp),color=Color.White,fontSize=12.sp,fontWeight=FontWeight.SemiBold)}}}
 @Composable private fun EpisodeNav(previous:Episode?,next:Episode?,onEpisode:(Episode)->Unit,episode:Episode){Row(Modifier.fillMaxWidth().padding(7.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){TextButton(onClick={previous?.let(onEpisode)},enabled=previous!=null){Text("Previous")};Text("EP ${episode.number}",color=Color.White,fontWeight=FontWeight.Bold);TextButton(onClick={next?.let(onEpisode)},enabled=next!=null){Text("Next")}}}
-private fun loadWatchPosition(context:Context,url:String):Long=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).getLong("pos_"+url.hashCode(),0L)
-private fun saveWatchPosition(context:Context,url:String,position:Long){if(url.isNotBlank())context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putLong("pos_"+url.hashCode(),position.coerceAtLeast(0L)).apply()}
-private fun isDirectMediaUrl(url:String):Boolean{
-    val u=url.substringBefore('?').lowercase()
-    return u.endsWith(".m3u8")||u.endsWith(".mp4")||u.endsWith(".webm")||u.endsWith(".mpd")
-}
 private fun fetchPlayerServers(url:String):List<PlayerServer>{
+    // AniSteam embeds AnimeSalt's real server/player pages only.
+    // It never extracts a raw media URL or substitutes its own player.
     val page=getHtml(url)
     val result=mutableListOf<PlayerServer>()
 
     fun add(name:String,target:String){
         if(target.isBlank()) return
-        val cleaned=target.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\'', '"')
+        val cleaned=target.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\'','"')
         val absolute=try{URL(url).let{base->URL(base,cleaned).toString()}}catch(_:Exception){cleaned}
         if(!absolute.startsWith("http",true)) return
         if(result.none{it.url==absolute}) result.add(PlayerServer(name,absolute))
@@ -393,37 +385,16 @@ private fun fetchPlayerServers(url:String):List<PlayerServer>{
                     val player=item.optString("link").trim()
                     if(player.isNotBlank()) add(if(language.isNotBlank()) language else "Server "+(i+1),player)
                 }
-            }catch(_:Exception){ add("Embedded",target) }
+            }catch(_:Exception){
+                add("Embedded",target)
+            }
         }else{
-            val lower=target.lowercase()
-            add(when{
-                lower.contains("mystream")->"MyStream"
-                lower.contains("abyss")->"Abyss"
-                isDirectMediaUrl(target)->"Direct"
-                else->"Embedded"
-            },target)
-        }
-    }
-
-    page.select("video[src], video source[src], source[src]").forEach { el ->
-        val target=el.absUrl("src").ifBlank{el.attr("src")}
-        if(target.isNotBlank()) add(if(isDirectMediaUrl(target)) "Direct" else "Embedded",target)
-    }
-
-    page.select("[data-src],[data-url],[data-embed],[data-player],[onclick]").forEach { el ->
-        val context=el.outerHtml()
-        val label=el.text().trim()
-        val name=when{
-            label.contains("mystream",true)||context.contains("mystream",true)->"MyStream"
-            label.contains("abyss",true)||context.contains("abyss",true)->"Abyss"
-            else->"Embedded"
-        }
-        listOf(el.attr("data-src"),el.attr("data-url"),el.attr("data-embed"),el.attr("data-player"),el.attr("onclick")).forEach { value ->
-            Regex("""https?://[^\\s"'<>\\\\]+""").findAll(value).forEach { match -> add(name,match.value.trimEnd(')', ';', ',')) }
+            add("Embedded",target)
         }
     }
     return result.distinctBy{it.url}
 }
+
 private fun getHtml(url:String):org.jsoup.nodes.Document{
     return org.jsoup.Jsoup.connect(url)
         .userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36")
