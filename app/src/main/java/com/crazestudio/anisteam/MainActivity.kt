@@ -48,12 +48,12 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 @Composable fun App() {
     MaterialTheme(colorScheme=colors) {
-        var selected by remember { mutableStateOf<Int?>(null) }
-        if (selected == null) Home { id -> selected=id } else Details(selected!!){ selected=null }
+        var selected by remember { mutableStateOf<String?>(null) }
+        if (selected == null) Home { slug -> selected=slug } else Details(selected!!){ selected=null }
     }
 }
 
-@Composable private fun Home(onOpen:(Int)->Unit) {
+@Composable private fun Home(onOpen:(String)->Unit) {
     var q by remember { mutableStateOf("") }; var submitted by remember { mutableStateOf("") }
     var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(submitted) { loading=true;error=null;try{data=fetchAnime(submitted)}catch(e:Exception){error=e.message?:"Unable to load anime."}finally{loading=false} }
@@ -69,7 +69,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
             loading->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){CircularProgressIndicator()}
             error!=null->Box(Modifier.fillMaxSize().padding(24.dp),contentAlignment=Alignment.Center){Text("Unable to load catalog.\n"+error!!,color=Color.LightGray)}
             else->LazyVerticalGrid(columns=GridCells.Fixed(2),contentPadding=PaddingValues(14.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-                items(data){item->Column(Modifier.clickable{onOpen(item.id)}){Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D))){
+                items(data){item->Column(Modifier.clickable{onOpen(item.synopsis)}){Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D))){
                     AsyncImage(item.image,item.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
                     Text("★ "+item.score,color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold,modifier=Modifier.align(Alignment.TopStart).padding(8.dp).background(Color(0xCC0B0B0F),RoundedCornerShape(7.dp)).padding(7.dp,4.dp))
                 };Spacer(Modifier.height(7.dp));Text(item.title,color=Color.White,fontWeight=FontWeight.SemiBold,maxLines=2);Text(item.type+" • "+item.episodes+" eps",color=Color.Gray,fontSize=11.sp)}}
@@ -78,11 +78,11 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     }
 }
 
-@Composable private fun Details(id:Int,onBack:()->Unit) {
+@Composable private fun Details(slug:String,onBack:()->Unit) {
     val context=LocalContext.current
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)}
-    LaunchedEffect(id){loading=true;try{anime=fetchDetails(id);eps=fetchEpisodes(id)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("No authorized in-app playback URL is configured yet. Open the configured AnimeSalt.cx source website to continue.")},confirmButton={TextButton({chosen=null;context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(SOURCE)))}){Text("Open source")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
+    LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);eps=fetchEpisodesBySlug(slug)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("No authorized in-app playback URL is configured yet. Open the configured AnimeSalt.cx source website to continue.")},confirmButton={TextButton({chosen=null;context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("$BASE_URL/episode/$slug-1x${ep.number}/")))}){Text("Open source")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
