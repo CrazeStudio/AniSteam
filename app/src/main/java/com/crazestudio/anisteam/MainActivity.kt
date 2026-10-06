@@ -1,6 +1,7 @@
 package com.crazestudio.anisteam
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -87,7 +88,6 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 }
 
 @Composable private fun Details(slug:String,onBack:()->Unit) {
-    BackHandler(enabled=true){onBack()}
     val context=LocalContext.current
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingEpisode by remember{mutableStateOf<Episode?>(null)};var playerLoading by remember{mutableStateOf(false)};var playerError by remember{mutableStateOf<String?>(null)}
     LaunchedEffect(slug){
@@ -100,9 +100,8 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
         try{eps=fetchEpisodesBySlug(slug,season)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load episodes."}finally{loading=false}
     }
     LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; try { val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}; if(servers.isEmpty()) playerError="AnimeSalt did not expose a public player for this episode." else {val ready=ep.copy(servers=servers);playingEpisode=ready;saveContinueWatching(context,ready)} } catch(e:kotlinx.coroutines.CancellationException){ throw e } catch(e:Exception){ playerError="Unable to load AnimeSalt servers: ${e.message ?: "network error"}" } finally { playerLoading=false } }
-    if(playingEpisode!=null){if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!){playingEpisode=null}};return}
-    BackHandler(enabled=playingEpisode!=null){playingEpisode=null}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Check AnimeSalt and open its real embedded player.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
+    if(playingEpisode!=null){BackHandler(enabled=true){playingEpisode=null};if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!,eps){playingEpisode=null}};return}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Open this episode in AniSteam Player. Playback uses a publicly exposed media URL when AnimeSalt provides one.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
@@ -190,23 +189,77 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
-@Composable private fun SourcePlayer(episode:Episode,onBack:()->Unit){
-    var selected by remember(episode){mutableStateOf(0)}
-    val server=episode.servers.getOrNull(selected)
-    var failed by remember(server?.url){mutableStateOf<String?>(null)}
+@Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit){
+    val context=LocalContext.current
+    val activity=context as? ComponentActivity
+    val direct=episode.servers.firstOrNull{isDirectMediaUrl(it.url)}
+    var failed by remember(direct?.url){mutableStateOf<String?>(null)}
+    var fullscreen by remember{mutableStateOf(false)}
+    val index=episodes.indexOfFirst{it.number==episode.number}
+    val previous=episodes.getOrNull(index-1)
+    val next=episodes.getOrNull(index+1)
+    BackHandler{if(fullscreen){fullscreen=false;activity?.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}else onBack()}
+    if(direct==null){
+        Column(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){
+            Text("AniSteam Player",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Bold)
+            Spacer(Modifier.height(10.dp));Text("No direct public media URL was exposed for this episode.",color=Color.LightGray)
+            Spacer(Modifier.height(8.dp));Text("The source only exposed an embedded player. AniSteam will not fake playback or bypass protected streams.",color=Color.Gray)
+            Spacer(Modifier.height(18.dp));TextButton(onClick=onBack){Text("Back")}
+        }
+        return
+    }
+    val player=remember(direct.url){
+        ExoPlayer.Builder(context).build().apply{
+            setMediaItem(MediaItem.fromUri(direct.url));prepare();playWhenReady=true
+        }
+    }
+    DisposableEffect(player,direct.url){
+        val listener=object:androidx.media3.common.Player.Listener{
+            override fun onPlayerError(error:PlaybackException){failed=error.message?:"Playback error"}
+        }
+        player.addListener(listener)
+        onDispose{player.removeListener(listener);player.release();if(fullscreen)activity?.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}
+    }
     Column(Modifier.fillMaxSize().background(Color.Black)){
-        Row(Modifier.fillMaxWidth().padding(6.dp),verticalAlignment=Alignment.CenterVertically){TextButton(onClick=onBack){Text("‹ Back",color=Color.White)};Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number}",color=Color.Gray,fontSize=11.sp)}}
-        if(episode.servers.size>1){Row(Modifier.fillMaxWidth().padding(horizontal=10.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){episode.servers.forEachIndexed{index,s->TextButton(onClick={selected=index;failed=null},enabled=selected!=index){Text(s.name,color=if(selected==index)colors.secondary else Color.White,fontWeight=FontWeight.Bold)}}}}
-        if(server==null){Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){Text("No public player server was found.",color=Color.LightGray)}}
-        else if(failed!=null){Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){Text("Player failed to load",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Text(failed!!,color=Color.LightGray);Spacer(Modifier.height(16.dp));TextButton(onClick={failed=null}){Text("Retry")}}}
-        else{AndroidView(factory={context->android.webkit.WebView(context).apply{setBackgroundColor(android.graphics.Color.BLACK);settings.javaScriptEnabled=true;settings.domStorageEnabled=true;settings.databaseEnabled=true;settings.mediaPlaybackRequiresUserGesture=false;settings.loadsImagesAutomatically=true;settings.allowFileAccess=true;settings.allowContentAccess=true;settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW;android.webkit.CookieManager.getInstance().setAcceptCookie(true);android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this,true);webViewClient=object:android.webkit.WebViewClient(){override fun onReceivedError(view:android.webkit.WebView,request:android.webkit.WebResourceRequest,error:android.webkit.WebResourceError){if(request.isForMainFrame)failed=error.description?.toString() ?: "Network error"}};webChromeClient=android.webkit.WebChromeClient();loadUrl(server.url,mapOf("Referer" to episode.url.ifBlank{"https://animesalt.cx/"}))}},update={webView->if(webView.url!=server.url)webView.loadUrl(server.url,mapOf("Referer" to episode.url.ifBlank{"https://animesalt.cx/"}))},modifier=Modifier.fillMaxSize())}
+        Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
+            TextButton(onClick=onBack){Text("‹ Back",color=Color.White)}
+            Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number}",color=Color.Gray,fontSize=11.sp)}
+            TextButton(onClick={fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}){Text("FULL",color=Color.White,fontSize=11.sp)}
+        }
+        AndroidView(factory={ctx->PlayerView(ctx).apply{useController=true;setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)}},update={view->view.player=player},modifier=Modifier.fillMaxWidth().weight(1f))
+        if(failed!=null){Text(failed!!,color=Color(0xFFFF8A8A),modifier=Modifier.padding(10.dp))}
+        Row(Modifier.fillMaxWidth().padding(8.dp),horizontalArrangement=Arrangement.SpaceEvenly){
+            TextButton(onClick={previous?.let{onBack()}},enabled=previous!=null){Text("Previous")}
+            Text("EP ${episode.number}",color=Color.White,modifier=Modifier.padding(top=12.dp))
+            TextButton(onClick={next?.let{onBack()}},enabled=next!=null){Text("Next")}
+        }
     }
 }
 
+private fun isDirectMediaUrl(url:String):Boolean{
+    val u=url.substringBefore('?').lowercase()
+    return u.endsWith(".m3u8")||u.endsWith(".mp4")||u.endsWith(".webm")||u.endsWith(".mpd")
+}
 private fun fetchPlayerServers(url:String):List<PlayerServer>{
-    val doc=getHtml(url);val result=mutableListOf<PlayerServer>()
-    val iframe=doc.selectFirst("iframe[src]")?.absUrl("src").orEmpty();if(iframe.isNotBlank())result.add(PlayerServer("Default",iframe))
-    listOf("MyStream","Abyss").forEach{label->doc.select("a,button,li,div").filter{it.text().trim().equals(label,ignoreCase=true)}.forEach{el->val target=listOf("data-src","data-url","data-embed","href").asSequence().map{el.attr(it)}.firstOrNull{it.isNotBlank()}.orEmpty();if(target.isNotBlank()){val absolute=el.absUrl("href").ifBlank{target};if(absolute.isNotBlank()&&result.none{it.url==absolute})result.add(PlayerServer(label,absolute))}}};return result.distinctBy{it.url}
+    val page=getHtml(url)
+    val result=mutableListOf<PlayerServer>()
+    fun add(name:String,target:String){val absolute=if(target.startsWith("//"))"https:$target" else target;if(absolute.isNotBlank()&&result.none{it.url==absolute})result.add(PlayerServer(name,absolute))}
+    page.select("video[src],video source[src],source[src],a[href]").forEach{el->
+        val target=el.attr("src").ifBlank{el.attr("href")}
+        if(isDirectMediaUrl(target))add("AnimeSalt",el.absUrl("src").ifBlank{target})
+    }
+    page.select("iframe[src]").forEach{el->
+        val iframe=el.absUrl("src")
+        if(isDirectMediaUrl(iframe))add("AnimeSalt",iframe)
+        else if(iframe.isNotBlank())try{
+            val embedded=getHtml(iframe)
+            embedded.select("video[src],video source[src],source[src],a[href]").forEach{media->
+                val target=media.attr("src").ifBlank{media.attr("href")}
+                if(isDirectMediaUrl(target))add("Public media",media.absUrl("src").ifBlank{target})
+            }
+        }catch(_:Exception){}
+    }
+    return result.distinctBy{it.url}
 }
 private fun getHtml(url:String):org.jsoup.nodes.Document{
     return org.jsoup.Jsoup.connect(url)
