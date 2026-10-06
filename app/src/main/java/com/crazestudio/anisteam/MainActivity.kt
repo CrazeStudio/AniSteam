@@ -39,7 +39,7 @@ private const val SOURCE = "https://animesalt.cx"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1)
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
-data class Episode(val number:Int,val title:String,val aired:String,val url:String="")
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="")
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -88,7 +88,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingUrl by remember{mutableStateOf<String?>(null)}
     LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
     if(playingUrl!=null){SourcePlayer(playingUrl!!){playingUrl=null};return}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl=ep.url.ifBlank { "$BASE_URL/episode/$slug-${season}x1/" }}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl=ep.playerUrl.ifBlank { ep.url.ifBlank { "$BASE_URL/episode/$slug-${season}x1/" } }}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
@@ -160,29 +160,58 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
-    val doc=getHtml("$BASE_URL/episode/$slug-${season}x1/")
+    val pageUrl="$BASE_URL/episode/$slug-${season}x1/"
+    val doc=getHtml(pageUrl)
+    val playerUrl=doc.selectFirst("iframe[src]")?.absUrl("src").orEmpty()
     val nodes=doc.select("#episode_by_temp li, a[href*=/episode/]")
     nodes.mapNotNull { el ->
         val text=el.text().trim()
         val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
         val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
-        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() })
+        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() },playerUrl)
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
 @Composable private fun SourcePlayer(url:String,onBack:()->Unit){
+    var failed by remember(url){mutableStateOf<String?>(null)}
     Column(Modifier.fillMaxSize().background(Color.Black)){
-        TextButton(onClick=onBack){Text("‹ Back",color=Color.White)}
-        AndroidView(factory={context->android.webkit.WebView(context).apply{
-            settings.javaScriptEnabled=true
-            settings.domStorageEnabled=true
-            settings.mediaPlaybackRequiresUserGesture=false
-            settings.loadsImagesAutomatically=true
-            settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            webViewClient=android.webkit.WebViewClient()
-            loadUrl(url)
-        }},modifier=Modifier.fillMaxSize())
+        Row(Modifier.fillMaxWidth().padding(6.dp),verticalAlignment=Alignment.CenterVertically){
+            TextButton(onClick=onBack){Text("‹ Back",color=Color.White)}
+            Text("AnimeSalt Player",color=Color.White,fontWeight=FontWeight.Bold)
+        }
+        if(failed!=null){
+            Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){
+                Text("Player failed to load",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(failed!!,color=Color.LightGray)
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick={failed=null}){Text("Retry")}
+            }
+        }else{
+            AndroidView(factory={context->
+                android.webkit.WebView(context).apply{
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    settings.javaScriptEnabled=true
+                    settings.domStorageEnabled=true
+                    settings.databaseEnabled=true
+                    settings.mediaPlaybackRequiresUserGesture=false
+                    settings.loadsImagesAutomatically=true
+                    settings.allowFileAccess=true
+                    settings.allowContentAccess=true
+                    settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this,true)
+                    webViewClient=object:android.webkit.WebViewClient(){
+                        override fun onReceivedError(view:android.webkit.WebView,request:android.webkit.WebResourceRequest,error:android.webkit.WebResourceError){
+                            if(request.isForMainFrame) failed=error.description?.toString() ?: "Network error"
+                        }
+                    }
+                    webChromeClient=android.webkit.WebChromeClient()
+                    loadUrl(url,mapOf("Referer" to "$BASE_URL/"))
+                }
+            },modifier=Modifier.fillMaxSize())
+        }
     }
 }
 
