@@ -534,7 +534,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                             Text(eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
                         }
                         Spacer(Modifier.height(12.dp))
-
+                    }
+                }
                 if(loading){
                     item{
                         Box(Modifier.fillMaxWidth().height(100.dp),contentAlignment=Alignment.Center){
@@ -545,7 +546,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     items(eps,key={it.url}){ep->
                         Row(
                             Modifier.padding(horizontal=18.dp,vertical=4.dp).fillMaxWidth()
-                                .clip(RoundedCornerShape(15.dp)).background(Color(0xFF111117))
+                                .clip(RoundedCornerShape(16.dp)).background(Color(0xFF121217))
                                 .clickable{chosen=ep}.padding(horizontal=13.dp,vertical=12.dp),
                             verticalAlignment=Alignment.CenterVertically
                         ){
@@ -554,7 +555,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=13.sp,maxLines=2)
                                 if(ep.aired.isNotBlank())Text(ep.aired,color=Color(0xFF70707B),fontSize=9.sp)
                             }
-                            Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B1B24)),contentAlignment=Alignment.Center){
+                            Box(Modifier.size(36.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B1B24)),contentAlignment=Alignment.Center){
                                 Text("▶",color=colors.primary,fontSize=10.sp)
                             }
                         }
