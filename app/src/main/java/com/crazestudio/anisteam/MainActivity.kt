@@ -10,6 +10,16 @@ import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -64,8 +74,31 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     MaterialTheme(colorScheme=colors) {
         var selected by remember { mutableStateOf<String?>(null) }
         var showSources by remember { mutableStateOf(false) }
-        if (selected == null) Home(onOpen = { slug -> selected=slug }, onSources = { showSources=true }) else Details(selected!!){ selected=null }
-        if (showSources) SourceDialog(onDismiss = { showSources=false })
+
+        AnimatedContent(
+            targetState=selected,
+            transitionSpec={
+                if (targetState==null) {
+                    (fadeIn(tween(260)) + slideInHorizontally(initialOffsetX={-it/5},animationSpec=tween(320)))
+                        .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(targetOffsetX={it/5},animationSpec=tween(220)))
+                } else {
+                    (fadeIn(tween(260)) + slideInHorizontally(initialOffsetX={it/5},animationSpec=tween(320)))
+                        .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(targetOffsetX={-it/5},animationSpec=tween(220)))
+                }
+            },
+            label="screenTransition"
+        ){slug ->
+            if(slug==null) Home(onOpen={selected=it},onSources={showSources=true})
+            else Details(slug){selected=null}
+        }
+
+        AnimatedVisibility(
+            visible=showSources,
+            enter=fadeIn(tween(180)),
+            exit=fadeOut(tween(140))
+        ){
+            SourceDialog(onDismiss={showSources=false})
+        }
     }
 }
 
@@ -96,7 +129,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                     TextButton(onClick=onSources){Text("SOURCE",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
                 }
                 Spacer(Modifier.height(14.dp))
-                OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,shape=RoundedCornerShape(18.dp),placeholder={Text("Search anime...",color=Color(0xFF777781))},trailingIcon={
+                OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth().animateContentSize(),singleLine=true,shape=RoundedCornerShape(18.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=colors.primary,unfocusedBorderColor=Color(0xFF292933),cursorColor=colors.primary,focusedContainerColor=Color(0xFF111117),unfocusedContainerColor=Color(0xFF111117)),placeholder={Text("Search anime...",color=Color(0xFF777781))},trailingIcon={
                     if(q.isNotBlank())TextButton(onClick={submitted=q.trim()}){Text("SEARCH",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
                 })
             }
@@ -135,7 +168,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
             }
         }
         item{
-            Text(if(submitted.isBlank())"DISCOVER" else "SEARCH RESULTS",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp,vertical=6.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically){Text(if(submitted.isBlank())"DISCOVER" else "SEARCH RESULTS",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));if(submitted.isNotBlank())TextButton(onClick={q="";submitted=""}){Text("CLEAR",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
         }
         when{
             loading->item{Box(Modifier.fillMaxWidth().height(260.dp),contentAlignment=Alignment.Center){CircularProgressIndicator(color=colors.primary)}}
@@ -144,7 +177,7 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
             else->{
                 val visible=data.drop(if(submitted.isBlank())1 else 0)
                 items(visible){anime->
-                    Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(Color(0xFF121218)).clickable{onOpen(anime.slug)}.padding(10.dp),verticalAlignment=Alignment.CenterVertically){
+                    Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF111117)).clickable{onOpen(anime.slug)}.animateContentSize().padding(10.dp),verticalAlignment=Alignment.CenterVertically){
                         AsyncImage(anime.image,anime.title,Modifier.size(76.dp,100.dp).clip(RoundedCornerShape(11.dp)),contentScale=ContentScale.Crop)
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)){
