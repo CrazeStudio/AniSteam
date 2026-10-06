@@ -241,11 +241,60 @@ private fun isDirectMediaUrl(url:String):Boolean{
     return u.endsWith(".m3u8")||u.endsWith(".mp4")||u.endsWith(".webm")||u.endsWith(".mpd")
 }
 private fun fetchPlayerServers(url:String):List<PlayerServer>{
-    val page=getHtml(url); val result=mutableListOf<PlayerServer>()
-    fun add(name:String,target:String){if(target.isBlank())return;val absolute=try{URL(url).let{base->URL(base,target).toString()}}catch(_:Exception){target};if(result.none{it.url==absolute})result.add(PlayerServer(name,absolute))}
-    page.select("video[src],video source[src],source[src]").forEach{el->{val target=el.absUrl("src").ifBlank{el.attr("src")};if(isDirectMediaUrl(target))add("Direct",target)}}
-    page.select("iframe[src]").forEach{el->{val iframe=el.absUrl("src").ifBlank{el.attr("src")};if(iframe.isNotBlank())add("Embedded",iframe)}}
-    page.select("[data-src],[data-url],[data-embed],[data-player],a[href]").forEach{el->{val text=el.text().trim();val name=when{ text.contains("mystream",true)->"MyStream"; text.contains("abyss",true)->"Abyss"; else->"Server ${result.size+1}"};val target=el.attr("data-src").ifBlank{el.attr("data-url")}.ifBlank{el.attr("data-embed")}.ifBlank{el.attr("data-player")}.ifBlank{el.absUrl("href")};if(target.isNotBlank()&&(text.contains("mystream",true)||text.contains("abyss",true)||isDirectMediaUrl(target)))add(name,target)}}
+    val page=getHtml(url)
+    val html=page.outerHtml()
+    val result=mutableListOf<PlayerServer>()
+    fun add(name:String,target:String){
+        if(target.isBlank()) return
+        val cleaned=target.replace("\\u0026","&").replace("\\/","/").trim().trim('\'','"')
+        val absolute=try{URL(url).let{base->URL(base,cleaned).toString()}}catch(_:Exception){cleaned}
+        if(absolute.startsWith("http",true) && result.none{it.url==absolute})
+            result.add(PlayerServer(if(name.isBlank()) "Server "+(result.size+1) else name,absolute))
+    }
+    page.select("iframe[src],video[src],video source[src],source[src]").forEach{el->
+        val target=el.absUrl("src").ifBlank{el.attr("src")}
+        if(target.isNotBlank()){
+            val raw=el.outerHtml()
+            val name=when{
+                raw.contains("mystream",true)->"MyStream"
+                raw.contains("abyss",true)->"Abyss"
+                isDirectMediaUrl(target)->"Direct"
+                else->"Embedded"
+            }
+            add(name,target)
+        }
+    }
+    page.select("[data-src],[data-url],[data-embed],[data-player],[onclick],a[href],button").forEach{el->
+        val context=el.outerHtml()
+        val label=el.text().trim()
+        val name=when{
+            label.contains("mystream",true)||context.contains("mystream",true)->"MyStream"
+            label.contains("abyss",true)||context.contains("abyss",true)->"Abyss"
+            else->"Server "+(result.size+1)
+        }
+        listOf(el.attr("data-src"),el.attr("data-url"),el.attr("data-embed"),el.attr("data-player"),el.attr("href"),el.attr("onclick")).forEach{value->
+            Regex("""https?://[^\s"'<>\\]+""").findAll(value).forEach{m->
+                val target=m.value.trimEnd(')', ';', ',')
+                if(isDirectMediaUrl(target)||target.contains("embed",true)||target.contains("player",true)||target.contains("stream",true)||target.contains("cdn",true))
+                    add(name,target)
+            }
+        }
+    }
+    Regex("""https?://[^\s"'<>\\]+""").findAll(html).forEach{m->
+        val target=m.value.trimEnd(')', ';', ',')
+        val start=maxOf(0,m.range.first-500)
+        val end=minOf(html.length,m.range.last+501)
+        val surrounding=html.substring(start,end)
+        if(isDirectMediaUrl(target)||target.contains("embed",true)||target.contains("player",true)||target.contains("stream",true)||target.contains("cdn",true)){
+            val name=when{
+                surrounding.contains("mystream",true)->"MyStream"
+                surrounding.contains("abyss",true)->"Abyss"
+                isDirectMediaUrl(target)->"Direct"
+                else->"Embedded"
+            }
+            add(name,target)
+        }
+    }
     return result.distinctBy{it.url}
 }
 private fun getHtml(url:String):org.jsoup.nodes.Document{
