@@ -44,6 +44,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import android.content.Context
+import android.util.Base64
 
 private const val SOURCE = "https://animesalt.cx"
 
@@ -228,9 +229,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
             AndroidView(factory={ctx->android.webkit.WebView(ctx).apply{settings.javaScriptEnabled=true;settings.domStorageEnabled=true;settings.mediaPlaybackRequiresUserGesture=false;webViewClient=WebViewClient();webChromeClient=WebChromeClient();setBackgroundColor(android.graphics.Color.BLACK);loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))}},update={if(it.url!=server.url)it.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))},modifier=Modifier.fillMaxWidth().weight(1f))
             Column(Modifier.fillMaxWidth().background(Color(0xFF0D0D12))){PlayerHeader(episode,onBack,{fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED});ServerPicker(episode.servers,selectedServer!!){selectedServer=it};EpisodeNav(previous,next,onEpisode,episode)}
         }
-        Column(Modifier.fillMaxWidth().background(Color(0xFF0D0D12))){PlayerHeader(episode,onBack,{fullscreen=!fullscreen;activity?.requestedOrientation=if(fullscreen)ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED});ServerPicker(episode.servers,selectedServer!!){selectedServer=it};EpisodeNav(previous,next,onEpisode,episode)}
     }
-}
 @Composable private fun PlayerHeader(episode:Episode,onBack:()->Unit,onFullscreen:()->Unit){Row(Modifier.fillMaxWidth().background(Color(0xFF0D0D12)).padding(horizontal=8.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically){TextButton(onClick=onBack){Text("‹ Back",color=Color.White)};Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number} • ${episode.title.ifBlank{"AnimeSalt"}}",color=Color.Gray,fontSize=11.sp,maxLines=1)};TextButton(onClick=onFullscreen){Text("FULL",color=Color.White,fontSize=11.sp)}}}
 @Composable private fun ServerPicker(servers:List<PlayerServer>,selected:PlayerServer,onSelect:(PlayerServer)->Unit){if(servers.size>1)Row(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=7.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)){servers.forEachIndexed{index,server->Text(server.name.ifBlank{"Server ${index+1}"},modifier=Modifier.clip(RoundedCornerShape(20.dp)).background(if(server.url==selected.url)colors.primary else Color(0xFF202027)).clickable{onSelect(server)}.padding(horizontal=14.dp,vertical=8.dp),color=Color.White,fontSize=12.sp,fontWeight=FontWeight.SemiBold)}}}
 @Composable private fun EpisodeNav(previous:Episode?,next:Episode?,onEpisode:(Episode)->Unit,episode:Episode){Row(Modifier.fillMaxWidth().padding(7.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){TextButton(onClick={previous?.let(onEpisode)},enabled=previous!=null){Text("Previous")};Text("EP ${episode.number}",color=Color.White,fontWeight=FontWeight.Bold);TextButton(onClick={next?.let(onEpisode)},enabled=next!=null){Text("Next")}}}
@@ -242,57 +241,57 @@ private fun isDirectMediaUrl(url:String):Boolean{
 }
 private fun fetchPlayerServers(url:String):List<PlayerServer>{
     val page=getHtml(url)
-    val html=page.outerHtml()
     val result=mutableListOf<PlayerServer>()
+
     fun add(name:String,target:String){
         if(target.isBlank()) return
-        val cleaned=target.replace("\\u0026","&").replace("\\/","/").trim().trim('\'','"')
+        val cleaned=target.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\'', '"')
         val absolute=try{URL(url).let{base->URL(base,cleaned).toString()}}catch(_:Exception){cleaned}
-        if(absolute.startsWith("http",true) && result.none{it.url==absolute})
-            result.add(PlayerServer(if(name.isBlank()) "Server "+(result.size+1) else name,absolute))
+        if(!absolute.startsWith("http",true)) return
+        if(result.none{it.url==absolute}) result.add(PlayerServer(name,absolute))
     }
-    page.select("iframe[src],video[src],video source[src],source[src]").forEach{el->
-        val target=el.absUrl("src").ifBlank{el.attr("src")}
-        if(target.isNotBlank()){
-            val raw=el.outerHtml()
-            val name=when{
-                raw.contains("mystream",true)->"MyStream"
-                raw.contains("abyss",true)->"Abyss"
+
+    page.select("iframe[src], iframe[data-src]").forEach { iframe ->
+        val target=iframe.attr("data-src").ifBlank { iframe.attr("src") }
+        if(target.isBlank()) return@forEach
+        val data=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null}
+        if(!data.isNullOrBlank()){
+            try{
+                val decoded=Base64.decode(data,Base64.DEFAULT).toString(Charsets.UTF_8)
+                val entries=JSONArray(decoded)
+                for(i in 0 until entries.length()){
+                    val item=entries.optJSONObject(i) ?: continue
+                    val language=item.optString("language").trim()
+                    val player=item.optString("link").trim()
+                    if(player.isNotBlank()) add(if(language.isNotBlank()) language else "Server "+(i+1),player)
+                }
+            }catch(_:Exception){ add("Embedded",target) }
+        }else{
+            val lower=target.lowercase()
+            add(when{
+                lower.contains("mystream")->"MyStream"
+                lower.contains("abyss")->"Abyss"
                 isDirectMediaUrl(target)->"Direct"
                 else->"Embedded"
-            }
-            add(name,target)
+            },target)
         }
     }
-    page.select("[data-src],[data-url],[data-embed],[data-player],[onclick],a[href],button").forEach{el->
+
+    page.select("video[src], video source[src], source[src]").forEach { el ->
+        val target=el.absUrl("src").ifBlank{el.attr("src")}
+        if(target.isNotBlank()) add(if(isDirectMediaUrl(target)) "Direct" else "Embedded",target)
+    }
+
+    page.select("[data-src],[data-url],[data-embed],[data-player],[onclick]").forEach { el ->
         val context=el.outerHtml()
         val label=el.text().trim()
         val name=when{
             label.contains("mystream",true)||context.contains("mystream",true)->"MyStream"
             label.contains("abyss",true)||context.contains("abyss",true)->"Abyss"
-            else->"Server "+(result.size+1)
+            else->"Embedded"
         }
-        listOf(el.attr("data-src"),el.attr("data-url"),el.attr("data-embed"),el.attr("data-player"),el.attr("href"),el.attr("onclick")).forEach{value->
-            Regex("""https?://[^\s"'<>\\]+""").findAll(value).forEach{m->
-                val target=m.value.trimEnd(')', ';', ',')
-                if(isDirectMediaUrl(target)||target.contains("embed",true)||target.contains("player",true)||target.contains("stream",true)||target.contains("cdn",true))
-                    add(name,target)
-            }
-        }
-    }
-    Regex("""https?://[^\s"'<>\\]+""").findAll(html).forEach{m->
-        val target=m.value.trimEnd(')', ';', ',')
-        val start=maxOf(0,m.range.first-500)
-        val end=minOf(html.length,m.range.last+501)
-        val surrounding=html.substring(start,end)
-        if(isDirectMediaUrl(target)||target.contains("embed",true)||target.contains("player",true)||target.contains("stream",true)||target.contains("cdn",true)){
-            val name=when{
-                surrounding.contains("mystream",true)->"MyStream"
-                surrounding.contains("abyss",true)->"Abyss"
-                isDirectMediaUrl(target)->"Direct"
-                else->"Embedded"
-            }
-            add(name,target)
+        listOf(el.attr("data-src"),el.attr("data-url"),el.attr("data-embed"),el.attr("data-player"),el.attr("onclick")).forEach { value ->
+            Regex("""https?://[^\\s"'<>\\\\]+""").findAll(value).forEach { match -> add(name,match.value.trimEnd(')', ';', ',')) }
         }
     }
     return result.distinctBy{it.url}
