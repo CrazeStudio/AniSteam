@@ -264,16 +264,11 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
 
         val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
         val seasonEpisode=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
+        // AnimeSalt can display cumulative episode numbers. The URL is authoritative.
         val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
-        val urlEpisode=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
-        if(urlSeason!=null && urlSeason!=season) return@mapNotNull null
-
-        val text=el.text().trim()
-        val displayed=el.selectFirst(".num-epi")?.text()?.trim().orEmpty()
-        val ep=urlEpisode
-            ?: displayed.filter{it.isDigit()}.toIntOrNull()
-            ?: Regex("\\b${season}x(\\d+)\\b").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val ep=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
             ?: return@mapNotNull null
+        if(urlSeason!=season) return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text()
             ?: text.replace(Regex("\\b${season}x\\d+\\b"),"").trim()).trim()
         Episode(
