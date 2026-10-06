@@ -252,9 +252,10 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
     val nodes=doc.select("#episode_by_temp li, #episode_by_temp_non_dubbed li, a[href*=/episode/]")
     return nodes.mapNotNull { el ->
-        val link=when{
-            el.is("a[href*=/episode/]")->el
-            else->el.selectFirst("a[href*=/episode/], a.lnk-blk")
+        val link=if(el.tagName()=="a" && el.attr("href").contains("/episode/")){
+            el
+        }else{
+            el.selectFirst("a[href*=/episode/], a.lnk-blk")
         } ?: return@mapNotNull null
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
         if(href.isBlank()) return@mapNotNull null
