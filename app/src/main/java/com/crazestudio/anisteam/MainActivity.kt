@@ -68,10 +68,13 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 @Composable private fun Home(onOpen:(String)->Unit, onSources:()->Unit) {
     var q by remember { mutableStateOf("") }; var submitted by remember { mutableStateOf("") }
-    var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; val continueWatching=remember{loadContinueWatching(LocalContext.current)}; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
+    val context=LocalContext.current
+    var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; val continueWatching=remember{loadContinueWatching(context)}; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(submitted) { loading=true;error=null;try{data=fetchAnime(submitted)}catch(e:Exception){error=e.message?:"Unable to load anime."}finally{loading=false} }
     Column(Modifier.fillMaxSize().background(colors.background)) {
-        Column(Modifier.padding(18.dp)) {\n            if(continueWatching!=null && continueWatching.animeSlug.isNotBlank()){Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF17171D)).clickable{onOpen(continueWatching.animeSlug)}.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("Continue Watching",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${continueWatching.number} • ${continueWatching.title}",color=Color.Gray,fontSize=12.sp)};Text("▶",color=colors.primary,fontSize=20.sp)}}\n            Spacer(Modifier.height(10.dp))
+        Column(Modifier.padding(18.dp)) {
+            if(continueWatching!=null && continueWatching.animeSlug.isNotBlank()){Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF17171D)).clickable{onOpen(continueWatching.animeSlug)}.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("Continue Watching",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${continueWatching.number} • ${continueWatching.title}",color=Color.Gray,fontSize=12.sp)};Text("▶",color=colors.primary,fontSize=20.sp)}}
+            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment=Alignment.CenterVertically){Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));TextButton(onClick=onSources){Text("SOURCES",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,placeholder={Text("Search anime...",color=Color.Gray)},trailingIcon={if(q.isNotBlank())TextButton({submitted=q.trim()}){Text("Search")}})
