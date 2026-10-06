@@ -70,25 +70,93 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     }
 }
 
-@Composable private fun Home(onOpen:(String)->Unit, onSources:()->Unit) {
-    var q by remember { mutableStateOf("") }; var submitted by remember { mutableStateOf("") }
-    val context=LocalContext.current; var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; val continueWatching=remember{loadContinueWatching(context)}
-    var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(submitted){ loading=true; error=null; try{data=fetchAnime(submitted)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){error=e.message?:"Unable to load anime."}finally{loading=false} }
+@Composable private fun Home(onOpen:(String)->Unit,onSources:()->Unit) {
+    var q by remember{mutableStateOf("")}
+    var submitted by remember{mutableStateOf("")}
+    val context=LocalContext.current
+    var data by remember{mutableStateOf<List<Anime>>(emptyList())}
+    val continueWatching=remember{loadContinueWatching(context)}
+    var loading by remember{mutableStateOf(true)}
+    var error by remember{mutableStateOf<String?>(null)}
+    LaunchedEffect(submitted){
+        loading=true;error=null
+        try{data=fetchAnime(submitted)}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){error=e.message?:"Unable to load anime."}
+        finally{loading=false}
+    }
     val featured=data.firstOrNull()
-    LazyColumn(Modifier.fillMaxSize().background(colors.background),contentPadding=PaddingValues(bottom=92.dp)){
-        item{Column(Modifier.padding(horizontal=18.dp,vertical=16.dp)){
-            Row(verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("ANISTEAM",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp);Text("Watch what you love.",color=Color(0xFF8E8E9A),fontSize=12.sp)};TextButton(onClick=onSources){Text("SOURCE",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
-            Spacer(Modifier.height(14.dp));OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,shape=RoundedCornerShape(18.dp),placeholder={Text("Search anime...",color=Color(0xFF777781))},trailingIcon={if(q.isNotBlank())TextButton(onClick={submitted=q.trim()}){Text("SEARCH",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}})
-        }}
-        if(!loading&&error==null&&featured!=null&&submitted.isBlank()) item{Column(Modifier.padding(horizontal=18.dp)){Text("FEATURED",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp);Spacer(Modifier.height(8.dp));Box(Modifier.fillMaxWidth().height(310.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFF17171D)).clickable{onOpen(featured.slug)}){AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop);Box(Modifier.fillMaxSize().background(Color(0x88000000)));Column(Modifier.align(Alignment.BottomStart).padding(20.dp)){Text(featured.title,color=Color.White,fontSize=26.sp,fontWeight=FontWeight.ExtraBold,maxLines=2);Spacer(Modifier.height(5.dp));Text(featured.type+" • "+featured.episodes+" eps  •  ★ "+featured.score,color=Color(0xFFE5E5EA),fontSize=12.sp);Spacer(Modifier.height(12.dp));Text("VIEW ANIME  ›",color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold,modifier=Modifier.clip(RoundedCornerShape(14.dp)).background(colors.primary).padding(horizontal=15.dp,vertical=9.dp))}}}}
-        if(continueWatching!=null&&continueWatching.animeSlug.isNotBlank()&&submitted.isBlank()) item{Column(Modifier.padding(horizontal=18.dp,vertical=20.dp)){Text("CONTINUE WATCHING",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold,letterSpacing=.7.sp);Spacer(Modifier.height(9.dp));Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF14141B)).clickable{onOpen(continueWatching.animeSlug)}.padding(13.dp),verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(58.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF24242D)),contentAlignment=Alignment.Center){Text("▶",color=colors.primary,fontSize=20.sp)};Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("Episode "+continueWatching.number,color=Color.White,fontWeight=FontWeight.Bold);Text(continueWatching.title.ifBlank{"Continue watching"},color=Color(0xFF92929D),fontSize=11.sp,maxLines=1)};Text("›",color=Color.White,fontSize=25.sp)}}}}
-        item{Row(Modifier.fillMaxWidth().padding(horizontal=18.dp),verticalAlignment=Alignment.CenterVertically){Text(if(submitted.isBlank())"DISCOVER" else "SEARCH RESULTS",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(submitted.isNotBlank())TextButton(onClick={submitted="";q=""}){Text("CLEAR",color=colors.primary,fontSize=10.sp)}}}
+    LazyColumn(Modifier.fillMaxSize().background(colors.background),contentPadding=PaddingValues(bottom=90.dp)){
+        item{
+            Column(Modifier.padding(18.dp)){
+                Row(verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("ANISTEAM",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
+                        Text("Watch what you love.",color=Color(0xFF8E8E9A),fontSize=12.sp)
+                    }
+                    TextButton(onClick=onSources){Text("SOURCE",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
+                }
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,shape=RoundedCornerShape(18.dp),placeholder={Text("Search anime...",color=Color(0xFF777781))},trailingIcon={
+                    if(q.isNotBlank())TextButton(onClick={submitted=q.trim()}){Text("SEARCH",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
+                })
+            }
+        }
+        if(!loading&&error==null&&featured!=null&&submitted.isBlank()){
+            item{
+                Column(Modifier.padding(horizontal=18.dp)){
+                    Text("FEATURED",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.fillMaxWidth().height(310.dp).clip(RoundedCornerShape(24.dp)).clickable{onOpen(featured.slug)}){
+                        AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+                        Box(Modifier.fillMaxSize().background(Color(0x88000000)))
+                        Column(Modifier.align(Alignment.BottomStart).padding(20.dp)){
+                            Text(featured.title,color=Color.White,fontSize=26.sp,fontWeight=FontWeight.ExtraBold,maxLines=2)
+                            Text(featured.type+" • "+featured.episodes+" eps • ★ "+featured.score,color=Color(0xFFE5E5EA),fontSize=12.sp)
+                        }
+                    }
+                }
+            }
+        }
+        if(continueWatching!=null&&continueWatching.animeSlug.isNotBlank()&&submitted.isBlank()){
+            item{
+                Column(Modifier.padding(18.dp)){
+                    Text("CONTINUE WATCHING",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF14141B)).clickable{onOpen(continueWatching.animeSlug)}.padding(13.dp),verticalAlignment=Alignment.CenterVertically){
+                        Text("▶",color=colors.primary,fontSize=20.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)){
+                            Text("Episode "+continueWatching.number,color=Color.White,fontWeight=FontWeight.Bold)
+                            Text(continueWatching.title.ifBlank{"Continue watching"},color=Color(0xFF92929D),fontSize=11.sp,maxLines=1)
+                        }
+                        Text("›",color=Color.White,fontSize=25.sp)
+                    }
+                }
+            }
+        }
+        item{
+            Text(if(submitted.isBlank())"DISCOVER" else "SEARCH RESULTS",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp,vertical=6.dp))
+        }
         when{
             loading->item{Box(Modifier.fillMaxWidth().height(260.dp),contentAlignment=Alignment.Center){CircularProgressIndicator(color=colors.primary)}}
-            error!=null->item{Column(Modifier.fillMaxWidth().padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){Text("Catalog unavailable",color=Color.White,fontWeight=FontWeight.Bold,fontSize=18.sp);Spacer(Modifier.height(6.dp));Text(error!!,color=Color(0xFF888893),fontSize=12.sp)}}
+            error!=null->item{Box(Modifier.fillMaxWidth().padding(28.dp),contentAlignment=Alignment.Center){Text(error!!,color=Color.LightGray)}}
             data.isEmpty()->item{Box(Modifier.fillMaxWidth().height(220.dp),contentAlignment=Alignment.Center){Text("No anime found.",color=Color(0xFF8C8C96))}}
-            else->item{Column(Modifier.padding(horizontal=18.dp,vertical=12.dp)){data.drop(if(submitted.isBlank())1 else 0).forEach{item->Row(Modifier.fillMaxWidth().padding(bottom=11.dp).clip(RoundedCornerShape(17.dp)).background(Color(0xFF121218)).clickable{onOpen(item.slug)}.padding(10.dp),verticalAlignment=Alignment.CenterVertically){AsyncImage(item.image,item.title,Modifier.size(76.dp,100.dp).clip(RoundedCornerShape(11.dp)),contentScale=ContentScale.Crop);Spacer(Modifier.width(13.dp));Column(Modifier.weight(1f)){Text(item.title,color=Color.White,fontWeight=FontWeight.Bold,fontSize=15.sp,maxLines=2);Spacer(Modifier.height(5.dp));Text(item.type+" • "+item.episodes+" eps",color=Color(0xFF858590),fontSize=11.sp);Spacer(Modifier.height(7.dp));Text("★ "+item.score,color=colors.secondary,fontSize=11.sp,fontWeight=FontWeight.Bold)};Text("›",color=Color(0xFF777781),fontSize=25.sp)}}}}
+            else->{
+                val visible=data.drop(if(submitted.isBlank())1 else 0)
+                items(visible){anime->
+                    Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(Color(0xFF121218)).clickable{onOpen(anime.slug)}.padding(10.dp),verticalAlignment=Alignment.CenterVertically){
+                        AsyncImage(anime.image,anime.title,Modifier.size(76.dp,100.dp).clip(RoundedCornerShape(11.dp)),contentScale=ContentScale.Crop)
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)){
+                            Text(anime.title,color=Color.White,fontWeight=FontWeight.Bold,fontSize=15.sp,maxLines=2)
+                            Text(anime.type+" • "+anime.episodes+" eps",color=Color(0xFF858590),fontSize=11.sp)
+                            Text("★ "+anime.score,color=colors.secondary,fontSize=11.sp,fontWeight=FontWeight.Bold)
+                        }
+                        Text("›",color=Color(0xFF777781),fontSize=25.sp)
+                    }
+                }
+            }
         }
     }
 }
