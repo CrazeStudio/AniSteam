@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -97,9 +96,7 @@ private fun AnimeHome() {
         }
 
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                 Text(error!!, color = Color(0xFFB8B8C0))
             }
@@ -111,8 +108,7 @@ private fun AnimeHome() {
                 )
                 Spacer(Modifier.height(8.dp))
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
+                    columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 28.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -124,28 +120,19 @@ private fun AnimeHome() {
 
 @Composable
 private fun FilterChip(label: String) {
-    Box(
-        Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF17171D)).clickable { }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
-    ) { Text(label, color = Color(0xFFC9C9D1), fontSize = 12.sp) }
+    Box(Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF17171D)).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Text(label, color = Color(0xFFC9C9D1), fontSize = 12.sp)
+    }
 }
 
 @Composable
 private fun AnimeCardView(item: AnimeCard) {
     Column(Modifier.fillMaxWidth()) {
-        Box(
-            Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF17171D))
-        ) {
-            AsyncImage(
-                model = item.image, contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-            )
-            Box(
-                Modifier.align(Alignment.TopStart).padding(7.dp)
-                    .clip(RoundedCornerShape(7.dp)).background(Color(0xCC0B0B0F))
-                    .padding(horizontal = 7.dp, vertical = 4.dp)
-            ) { Text("★ " + item.score, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+        Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D))) {
+            AsyncImage(model = item.image, contentDescription = item.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.align(Alignment.TopStart).padding(7.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xCC0B0B0F)).padding(horizontal = 7.dp, vertical = 4.dp)) {
+                Text("★ " + item.score, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.height(7.dp))
         Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2)
@@ -156,8 +143,8 @@ private fun AnimeCardView(item: AnimeCard) {
 
 private suspend fun fetchAnime(query: String): List<AnimeCard> = withContext(Dispatchers.IO) {
     val encoded = URLEncoder.encode(query, "UTF-8")
-    val endpoint = if (query.isBlank()) "https://api.jikan.moe/v4/top/anime?limit=12"
-    else "https://api.jikan.moe/v4/anime?q=" + encoded + "&limit=12"
+    val endpoint = if (query.isBlank()) "https://api.tenrai.org/v1/top/anime?limit=12"
+    else "https://api.tenrai.org/v1/anime?q=" + encoded + "&limit=12"
     val connection = URL(endpoint).openConnection() as HttpURLConnection
     connection.requestMethod = "GET"
     connection.connectTimeout = 10_000
