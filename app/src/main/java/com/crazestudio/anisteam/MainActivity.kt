@@ -234,25 +234,22 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
-    // AnimeSalt does not guarantee a /episode/<slug>-<season>x1/ page.
-    // Read the real season/post mapping from the series page and use AnimeSalt's
-    // own AJAX endpoint for seasons that are loaded dynamically.
     val seriesUrl="$BASE_URL/series/$slug/"
     val seriesDoc=getHtml(seriesUrl)
-    val seasonButton=seriesDoc.selectFirst(".season-btn[data-season=\"$season\"][data-post]")
-    val postId=seasonButton?.attr("data-post").orEmpty()
-
-    val episodeDoc=if(season==1 || postId.isBlank()){
-        seriesDoc
-    }else{
-        val ajaxUrl="$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$season&post=$postId"
-        getHtml(ajaxUrl)
+    fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
+        if(targetSeason==1) return seriesDoc
+        val button=seriesDoc.selectFirst(".season-btn[data-season=\"$targetSeason\"][data-post]")
+        val postId=button?.attr("data-post").orEmpty()
+        if(postId.isBlank()) return org.jsoup.Jsoup.parse("")
+        return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$targetSeason&post=$postId")
     }
-
-    parseEpisodeList(episodeDoc,slug,season)
+    val currentDoc=seasonDocument(season)
+    val previousSeasonCount=(1 until season).sumOf { previousSeason ->
+        parseEpisodeList(seasonDocument(previousSeason),slug,previousSeason).size
+    }
+    parseEpisodeList(currentDoc,slug,season,previousSeasonCount)
 }
-
-private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int):List<Episode>{
+private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
     val nodes=doc.select("#episode_by_temp li, #episode_by_temp_non_dubbed li, a[href*=/episode/]")
     return nodes.mapNotNull { el ->
         val link=when{
@@ -261,24 +258,15 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
         } ?: return@mapNotNull null
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
         if(href.isBlank()) return@mapNotNull null
-
         val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
         val seasonEpisode=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
-        // AnimeSalt can display cumulative episode numbers. The URL is authoritative.
         val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
-        val ep=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
-            ?: return@mapNotNull null
+        val seasonEpisodeNumber=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull() ?: return@mapNotNull null
         if(urlSeason!=season) return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text()
-            ?: text.replace(Regex("\\b${season}x\\d+\\b"),"").trim()).trim()
-        Episode(
-            ep,
-            title,
-            el.selectFirst("img")?.attr("alt").orEmpty(),
-            href,
-            animeSlug=slug
-        )
-    }.distinctBy{it.url}.distinctBy{it.number}.sortedBy{it.number}
+            ?: el.text().replace(Regex("\\b\${season}x\\d+\\b"),"").trim()).trim()
+        Episode(seasonEpisodeNumber+episodeOffset,title,el.selectFirst("img")?.attr("alt").orEmpty(),href,animeSlug=slug)
+    }.distinctBy{it.url}.sortedBy{it.number}
 }
 
 @Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit,onEpisode:(Episode)->Unit){
