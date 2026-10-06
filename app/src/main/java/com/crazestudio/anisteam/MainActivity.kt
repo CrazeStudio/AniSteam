@@ -244,8 +244,12 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$targetSeason&post=$postId")
     }
     val currentDoc=seasonDocument(season)
+    // AnimeSalt can expose the same season through multiple episode lists
+    // (for example dubbed/non-dubbed), so counting DOM entries can double-count.
+    // Use the highest real season-local episode number instead.
     val previousSeasonCount=(1 until season).sumOf { previousSeason ->
-        parseEpisodeList(seasonDocument(previousSeason),slug,previousSeason).size
+        parseEpisodeList(seasonDocument(previousSeason),slug,previousSeason)
+            .maxOfOrNull { it.number } ?: 0
     }
     parseEpisodeList(currentDoc,slug,season,previousSeasonCount)
 }
