@@ -264,7 +264,7 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
         val seasonEpisodeNumber=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull() ?: return@mapNotNull null
         if(urlSeason!=season) return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text()
-            ?: el.text().replace(Regex("\\b\${season}x\\d+\\b"),"").trim()).trim()
+            ?: el.text().replace(Regex("\\b" + season + "x\\d+\\b"),"").trim()).trim()
         Episode(seasonEpisodeNumber+episodeOffset,title,el.selectFirst("img")?.attr("alt").orEmpty(),href,animeSlug=slug)
     }.distinctBy{it.url}.sortedBy{it.number}
 }
