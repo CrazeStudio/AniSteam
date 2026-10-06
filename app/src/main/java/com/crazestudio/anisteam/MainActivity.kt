@@ -28,6 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -236,7 +240,9 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     }
 }
 
-private fun loadWatchPosition(context:Context,url:String):Long=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).getLong("pos_"+url.hashCode(),0L)\nprivate fun saveWatchPosition(context:Context,url:String,position:Long){if(url.isNotBlank())context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putLong("pos_"+url.hashCode(),position.coerceAtLeast(0L)).apply()}\nprivate fun isDirectMediaUrl(url:String):Boolean{
+private fun loadWatchPosition(context:Context,url:String):Long=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).getLong("pos_"+url.hashCode(),0L)
+private fun saveWatchPosition(context:Context,url:String,position:Long){if(url.isNotBlank())context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putLong("pos_"+url.hashCode(),position.coerceAtLeast(0L)).apply()}
+private fun isDirectMediaUrl(url:String):Boolean{
     val u=url.substringBefore('?').lowercase()
     return u.endsWith(".m3u8")||u.endsWith(".mp4")||u.endsWith(".webm")||u.endsWith(".mpd")
 }
