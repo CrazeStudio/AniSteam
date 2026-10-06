@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import kotlinx.coroutines.ensureActive
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -109,89 +111,266 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     var submitted by remember{mutableStateOf("")}
     val context=LocalContext.current
     var data by remember{mutableStateOf<List<Anime>>(emptyList())}
-    val continueWatching=remember{loadContinueWatching(context)}
+    val continueWatching=remember{loadContinueWatchingList(context)}
     var loading by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
+
     LaunchedEffect(submitted){
-        loading=true;error=null
-        try{data=fetchAnime(submitted)}
-        catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){error=e.message?:"Unable to load anime."}
-        finally{loading=false}
+        loading=true
+        error=null
+        try{
+            data=fetchAnime(submitted)
+        }catch(e:kotlinx.coroutines.CancellationException){
+            throw e
+        }catch(e:Exception){
+            error=e.message?:"Unable to load anime."
+        }finally{
+            loading=false
+        }
     }
+
     val featured=data.firstOrNull()
-    LazyColumn(Modifier.fillMaxSize().background(colors.background),contentPadding=PaddingValues(bottom=90.dp)){
+    val discover=data.drop(1).take(12)
+    val trending=data.drop(4).take(12)
+    val fresh=data.drop(16).take(12)
+
+    LazyColumn(
+        Modifier.fillMaxSize().background(Color(0xFF07070B)),
+        contentPadding=PaddingValues(bottom=42.dp)
+    ){
         item{
-            Column(Modifier.padding(18.dp)){
-                Row(verticalAlignment=Alignment.CenterVertically){
-                    Column(Modifier.weight(1f)){
-                        Text("ANISTEAM",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
-                        Text("Watch what you love.",color=Color(0xFF8E8E9A),fontSize=12.sp)
-                    }
-                    TextButton(onClick=onSources){Text("SOURCE",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=18.dp),
+                verticalAlignment=Alignment.CenterVertically
+            ){
+                Column(Modifier.weight(1f)){
+                    Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold)
+                    Text("Your anime, beautifully.",color=Color(0xFF777783),fontSize=11.sp)
                 }
-                Spacer(Modifier.height(14.dp))
-                OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth().animateContentSize(),singleLine=true,shape=RoundedCornerShape(18.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=colors.primary,unfocusedBorderColor=Color(0xFF292933),cursorColor=colors.primary,focusedContainerColor=Color(0xFF111117),unfocusedContainerColor=Color(0xFF111117)),placeholder={Text("Search anime...",color=Color(0xFF777781))},trailingIcon={
-                    if(q.isNotBlank())TextButton(onClick={submitted=q.trim()}){Text("SEARCH",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}
-                })
+                TextButton(onClick=onSources){
+                    Text("ANIMESALT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                }
             }
         }
-        if(!loading&&error==null&&featured!=null&&submitted.isBlank()){
+
+        item{
+            Column(Modifier.padding(horizontal=18.dp)){
+                OutlinedTextField(
+                    value=q,
+                    onValueChange={q=it},
+                    modifier=Modifier.fillMaxWidth(),
+                    singleLine=true,
+                    shape=RoundedCornerShape(16.dp),
+                    colors=OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor=colors.primary,
+                        unfocusedBorderColor=Color(0xFF24242D),
+                        cursorColor=colors.primary,
+                        focusedContainerColor=Color(0xFF111117),
+                        unfocusedContainerColor=Color(0xFF111117)
+                    ),
+                    placeholder={Text("Search anime, movies and series",color=Color(0xFF666671))},
+                    trailingIcon={
+                        if(q.isNotBlank()){
+                            TextButton(onClick={submitted=q.trim()}){
+                                Text("SEARCH",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
+        if(submitted.isBlank() && !loading && error==null && featured!=null){
             item{
-                Column(Modifier.padding(horizontal=18.dp)){
-                    Text("FEATURED",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Box(Modifier.fillMaxWidth().height(310.dp).clip(RoundedCornerShape(24.dp)).clickable{onOpen(featured.slug)}){
-                        AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
-                        Box(Modifier.fillMaxSize().background(Color(0x88000000)))
-                        Column(Modifier.align(Alignment.BottomStart).padding(20.dp)){
-                            Text(featured.title,color=Color.White,fontSize=26.sp,fontWeight=FontWeight.ExtraBold,maxLines=2)
-                            Text(featured.type+" • "+featured.episodes+" eps • ★ "+featured.score,color=Color(0xFFE5E5EA),fontSize=12.sp)
+                Spacer(Modifier.height(18.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(410.dp)
+                        .padding(horizontal=18.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .clickable{onOpen(featured.slug)}
+                ){
+                    AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent,Color(0xCC050509),Color(0xF5050509))
+                            )
+                        )
+                    )
+                    Column(
+                        Modifier.align(Alignment.BottomStart).padding(22.dp)
+                    ){
+                        Text("FEATURED",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
+                        Spacer(Modifier.height(7.dp))
+                        Text(featured.title,color=Color.White,fontSize=29.sp,fontWeight=FontWeight.ExtraBold,maxLines=2)
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            featured.type+"  •  "+featured.episodes+" episodes  •  ★ "+featured.score,
+                            color=Color(0xFFD0D0D7),fontSize=11.sp
+                        )
+                        Spacer(Modifier.height(13.dp))
+                        Row(
+                            Modifier.clip(RoundedCornerShape(12.dp)).background(colors.primary)
+                                .clickable{onOpen(featured.slug)}
+                                .padding(horizontal=18.dp,vertical=11.dp),
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Text("▶",color=Color.White,fontSize=12.sp)
+                            Spacer(Modifier.width(7.dp))
+                            Text("View anime",color=Color.White,fontWeight=FontWeight.Bold,fontSize=12.sp)
                         }
                     }
                 }
             }
         }
-        if(continueWatching!=null&&continueWatching.animeSlug.isNotBlank()&&submitted.isBlank()){
+
+        if(submitted.isBlank() && continueWatching.isNotEmpty()){
             item{
-                Column(Modifier.padding(18.dp)){
-                    Text("CONTINUE WATCHING",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF14141B)).clickable{onOpen(continueWatching.animeSlug)}.padding(13.dp),verticalAlignment=Alignment.CenterVertically){
-                        Text("▶",color=colors.primary,fontSize=20.sp)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)){
-                            Text("Episode "+continueWatching.number,color=Color.White,fontWeight=FontWeight.Bold)
-                            Text(continueWatching.title.ifBlank{"Continue watching"},color=Color(0xFF92929D),fontSize=11.sp,maxLines=1)
+                SectionHeader("CONTINUE WATCHING", "Keep watching")
+                LazyRow(
+                    contentPadding=PaddingValues(horizontal=18.dp),
+                    horizontalArrangement=Arrangement.spacedBy(12.dp)
+                ){
+                    items(continueWatching, key={it.url}){
+                        val watch=it
+                        val match=data.firstOrNull{anime->anime.slug==watch.animeSlug}
+                        Column(
+                            Modifier.width(190.dp).clip(RoundedCornerShape(17.dp))
+                                .background(Color(0xFF111117))
+                                .clickable{onOpen(watch.animeSlug)}
+                                .padding(10.dp)
+                        ){
+                            Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(12.dp))){
+                                if(match!=null){
+                                    AsyncImage(match.image,match.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+                                    Box(Modifier.fillMaxSize().background(Color(0x66000000)))
+                                }else{
+                                    Box(Modifier.fillMaxSize().background(Color(0xFF1B1B23)))
+                                }
+                                Box(
+                                    Modifier.align(Alignment.Center).size(38.dp).clip(RoundedCornerShape(50))
+                                        .background(colors.primary),
+                                    contentAlignment=Alignment.Center
+                                ){Text("▶",color=Color.White,fontSize=12.sp)}
+                            }
+                            Spacer(Modifier.height(9.dp))
+                            Text(match?.title ?: watch.title.ifBlank{"Anime"},color=Color.White,fontWeight=FontWeight.Bold,fontSize=13.sp,maxLines=1)
+                            Text("Episode "+watch.number,color=Color(0xFF858590),fontSize=11.sp)
                         }
-                        Text("›",color=Color.White,fontSize=25.sp)
                     }
                 }
             }
         }
-        item{
-            Row(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically){Text(if(submitted.isBlank())"DISCOVER" else "SEARCH RESULTS",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));if(submitted.isNotBlank())TextButton(onClick={q="";submitted=""}){Text("CLEAR",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
+
+        if(submitted.isBlank() && discover.isNotEmpty()){
+            item{SectionHeader("DISCOVER","Explore something new")}
+            item{AnimeRail(discover,onOpen)}
+            item{SectionHeader("TRENDING","Popular right now")}
+            item{AnimeRail(trending,onOpen)}
+            item{SectionHeader("JUST ADDED","Fresh from AnimeSalt")}
+            item{AnimeRail(fresh,onOpen)}
         }
+
+        item{
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=18.dp),
+                verticalAlignment=Alignment.CenterVertically
+            ){
+                Text(
+                    if(submitted.isBlank())"ALL ANIME" else "SEARCH RESULTS",
+                    color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold
+                )
+                Spacer(Modifier.weight(1f))
+                if(submitted.isNotBlank()){
+                    TextButton(onClick={q="";submitted=""}){
+                        Text("CLEAR",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         when{
-            loading->item{Box(Modifier.fillMaxWidth().height(260.dp),contentAlignment=Alignment.Center){CircularProgressIndicator(color=colors.primary)}}
-            error!=null->item{Box(Modifier.fillMaxWidth().padding(28.dp),contentAlignment=Alignment.Center){Text(error!!,color=Color.LightGray)}}
-            data.isEmpty()->item{Box(Modifier.fillMaxWidth().height(220.dp),contentAlignment=Alignment.Center){Text("No anime found.",color=Color(0xFF8C8C96))}}
+            loading->item{
+                Box(Modifier.fillMaxWidth().height(250.dp),contentAlignment=Alignment.Center){
+                    CircularProgressIndicator(color=colors.primary,strokeWidth=2.5.dp)
+                }
+            }
+            error!=null->item{
+                Box(Modifier.fillMaxWidth().padding(30.dp),contentAlignment=Alignment.Center){
+                    Text(error!!,color=Color(0xFF9999A4))
+                }
+            }
+            data.isEmpty()->item{
+                Box(Modifier.fillMaxWidth().height(220.dp),contentAlignment=Alignment.Center){
+                    Text("No anime found.",color=Color(0xFF777783))
+                }
+            }
             else->{
-                val visible=data.drop(if(submitted.isBlank())1 else 0)
-                items(visible){anime->
-                    Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF111117)).clickable{onOpen(anime.slug)}.animateContentSize().padding(10.dp),verticalAlignment=Alignment.CenterVertically){
-                        AsyncImage(anime.image,anime.title,Modifier.size(76.dp,100.dp).clip(RoundedCornerShape(11.dp)),contentScale=ContentScale.Crop)
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)){
-                            Text(anime.title,color=Color.White,fontWeight=FontWeight.Bold,fontSize=15.sp,maxLines=2)
-                            Text(anime.type+" • "+anime.episodes+" eps",color=Color(0xFF858590),fontSize=11.sp)
-                            Text("★ "+anime.score,color=colors.secondary,fontSize=11.sp,fontWeight=FontWeight.Bold)
-                        }
-                        Text("›",color=Color(0xFF777781),fontSize=25.sp)
-                    }
+                items(data, key={it.slug}){anime->
+                    AnimeListCard(anime){onOpen(anime.slug)}
                 }
             }
         }
+    }
+}
+
+@Composable private fun SectionHeader(label:String,subtitle:String){
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=18.dp),
+        verticalAlignment=Alignment.Bottom
+    ){
+        Column(Modifier.weight(1f)){
+            Text(label,color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
+            Spacer(Modifier.height(3.dp))
+            Text(subtitle,color=Color.White,fontSize=18.sp,fontWeight=FontWeight.ExtraBold)
+        }
+        Text("›",color=Color(0xFF666671),fontSize=22.sp)
+    }
+}
+
+@Composable private fun AnimeRail(anime:List<Anime>,onOpen:(String)->Unit){
+    LazyRow(
+        contentPadding=PaddingValues(horizontal=18.dp),
+        horizontalArrangement=Arrangement.spacedBy(12.dp)
+    ){
+        items(anime,key={it.slug}){item->
+            Column(
+                Modifier.width(135.dp).clickable{onOpen(item.slug)}
+            ){
+                AsyncImage(
+                    item.image,item.title,
+                    Modifier.fillMaxWidth().height(188.dp).clip(RoundedCornerShape(15.dp)),
+                    contentScale=ContentScale.Crop
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(item.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=12.sp,maxLines=2)
+                Text("★ "+item.score,color=Color(0xFF8E8E9A),fontSize=10.sp)
+            }
+        }
+    }
+}
+
+@Composable private fun AnimeListCard(anime:Anime,onClick:()->Unit){
+    Row(
+        Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(17.dp)).background(Color(0xFF111117))
+            .clickable(onClick=onClick).padding(10.dp),
+        verticalAlignment=Alignment.CenterVertically
+    ){
+        AsyncImage(
+            anime.image,anime.title,
+            Modifier.size(72.dp,94.dp).clip(RoundedCornerShape(11.dp)),
+            contentScale=ContentScale.Crop
+        )
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)){
+            Text(anime.title,color=Color.White,fontWeight=FontWeight.Bold,fontSize=14.sp,maxLines=2)
+            Spacer(Modifier.height(5.dp))
+            Text(anime.type+"  •  "+anime.episodes+" eps",color=Color(0xFF858590),fontSize=10.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("★ "+anime.score,color=colors.secondary,fontSize=10.sp,fontWeight=FontWeight.Bold)
+        }
+        Text("›",color=Color(0xFF777783),fontSize=25.sp)
     }
 }
 
@@ -215,8 +394,39 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     }
 }
 
-private fun saveContinueWatching(context:Context,ep:Episode){context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).edit().putInt("number",ep.number).putString("title",ep.title).putString("url",ep.url).putString("slug",ep.animeSlug).apply()}
-private fun loadContinueWatching(context:Context):Episode?{val p=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE);val u=p.getString("url",null)?:return null;return Episode(p.getInt("number",1),p.getString("title","Episode")?:"Episode","",u,animeSlug=p.getString("slug","")?:"")}
+private fun saveContinueWatching(context:Context,ep:Episode){
+    val prefs=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE)
+    val current=loadContinueWatchingList(context).filterNot{it.animeSlug==ep.animeSlug}
+    val updated=(listOf(ep)+current).take(20)
+    val json=JSONArray()
+    updated.forEach{
+        json.put(JSONObject().apply{
+            put("number",it.number)
+            put("title",it.title)
+            put("url",it.url)
+            put("slug",it.animeSlug)
+        })
+    }
+    prefs.edit().putString("items",json.toString()).apply()
+}
+private fun loadContinueWatchingList(context:Context):List<Episode>{
+    val raw=context.getSharedPreferences("anisteam_watch",Context.MODE_PRIVATE).getString("items",null) ?: return emptyList()
+    return try{
+        val json=JSONArray(raw)
+        (0 until json.length()).mapNotNull{index->
+            val o=json.optJSONObject(index) ?: return@mapNotNull null
+            Episode(
+                o.optInt("number",1),
+                o.optString("title","Episode"),
+                "",
+                o.optString("url",""),
+                animeSlug=o.optString("slug","")
+            )
+        }.filter{it.animeSlug.isNotBlank() && it.url.isNotBlank()}
+    }catch(_:Exception){emptyList()}
+}
+private fun loadContinueWatching(context:Context):Episode?=loadContinueWatchingList(context).firstOrNull()
+
 private const val BASE_URL = "https://animesalt.cx"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
