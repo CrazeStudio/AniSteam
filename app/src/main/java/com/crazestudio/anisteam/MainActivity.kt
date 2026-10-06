@@ -38,7 +38,7 @@ private const val SOURCE = "https://animesalt.cx"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1)
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
-data class Episode(val number:Int,val title:String,val aired:String)
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="")
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -87,7 +87,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
     var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingUrl by remember{mutableStateOf<String?>(null)}
     LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
     if(playingUrl!=null){SourcePlayer(playingUrl!!){playingUrl=null};return}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl="$BASE_URL/episode/$slug-${season}x1/"}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl=ep.url.ifBlank { "$BASE_URL/episode/$slug-${season}x1/" }}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
@@ -96,7 +96,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
             anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=24.dp)){
                 item{
                     Row(Modifier.padding(18.dp)){AsyncImage(anime!!.image,anime!!.title,Modifier.width(135.dp).height(195.dp).clip(RoundedCornerShape(12.dp)),contentScale=ContentScale.Crop);Spacer(Modifier.width(16.dp));Column{Text(anime!!.title,color=Color.White,fontSize=21.sp,fontWeight=FontWeight.Bold);Text(anime!!.type+" • "+anime!!.episodes+" eps",color=Color.Gray);Text("★ "+anime!!.score,color=colors.secondary)}}
-                    Text("Synopsis",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp));Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB8B8C0),modifier=Modifier.padding(18.dp));Text("Episodes",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(18.dp,8.dp));if(anime!!.seasons>1){Row(Modifier.padding(horizontal=18.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){(1..anime!!.seasons).forEach{s->TextButton(onClick={season=s;loading=true;error=null},enabled=season!=s){Text("Season $s")}}};LaunchedEffect(season){try{eps=fetchEpisodesBySlug(slug,season)}catch(e:Exception){error=e.message}}}
+                    Text("Synopsis",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp));Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB8B8C0),modifier=Modifier.padding(18.dp));Text("Episodes",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(18.dp,8.dp));if(anime!!.seasons>1){Row(Modifier.padding(horizontal=18.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){(1..anime!!.seasons).forEach{s->TextButton(onClick={season=s;loading=true;error=null},enabled=season!=s){Text("Season $s")}}};LaunchedEffect(season){try{loading=true;error=null;eps=fetchEpisodesBySlug(slug,season)}catch(e:Exception){error=e.message ?: "Unable to load episodes."}finally{loading=false}}}
                 }
                 items(eps){ep->Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF111116)).clickable{chosen=ep}.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Text(ep.number.toString(),color=colors.secondary,fontWeight=FontWeight.Bold,modifier=Modifier.width(42.dp));Column(Modifier.weight(1f)){Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,maxLines=2);if(ep.aired.isNotBlank())Text(ep.aired,color=Color.Gray,fontSize=11.sp)};Text("▶",color=colors.primary)}}
             }
@@ -166,7 +166,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
         val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
-        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty())
+        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() })
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
