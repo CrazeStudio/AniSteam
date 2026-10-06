@@ -682,26 +682,43 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     parseEpisodeList(currentDoc,slug,season,previousSeasonCount)
 }
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
-    val nodes=doc.select("#episode_by_temp li, #episode_by_temp_non_dubbed li, a[href*=/episode/]")
-    return nodes.mapNotNull { el ->
-        val link=if(el.tagName()=="a" && el.attr("href").contains("/episode/")){
-            el
-        }else{
-            el.selectFirst("a[href*=/episode/], a.lnk-blk")
-        } ?: return@mapNotNull null
+    // AnimeSalt can render multiple episode lists (dubbed/non-dubbed).
+    // Treat the episode URL as the source of truth and keep exactly one
+    // canonical entry for each season-local episode number.
+    val candidates=doc.select("a[href*=/episode/]").mapNotNull { link ->
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
         if(href.isBlank()) return@mapNotNull null
-        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
-        val seasonEpisode=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
-        val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull()
-        val seasonEpisodeNumber=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull() ?: return@mapNotNull null
-        if(urlSeason!=season) return@mapNotNull null
-        val title=(el.selectFirst(".entry-title,h2,h3")?.text()
-            ?: el.text().replace(Regex("\\b" + season + "x\\d+\\b"),"").trim()).trim()
-        Episode(seasonEpisodeNumber+episodeOffset,title,el.selectFirst("img")?.attr("alt").orEmpty(),href,animeSlug=slug)
-    }.distinctBy{it.url}.sortedBy{it.number}
-}
 
+        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
+        val match=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
+            ?: return@mapNotNull null
+
+        val urlSeason=match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+        val localNumber=match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+        if(urlSeason!=season) return@mapNotNull null
+
+        val container=link.closest("li,article,.item,.episode,.episode-item")
+        val title=(
+            link.selectFirst(".entry-title,h2,h3,h4,.title")?.text()
+                ?: container?.selectFirst(".entry-title,h2,h3,h4,.title")?.text()
+                ?: link.attr("title")
+                ?: link.text()
+        ).replace(Regex("\\s+")," ").trim()
+
+        Episode(
+            number=localNumber+episodeOffset,
+            title=title.ifBlank{"Episode $localNumber"},
+            aired="",
+            url=href,
+            animeSlug=slug
+        )
+    }
+
+    return candidates
+        .groupBy{it.number}
+        .mapNotNull{(_,items)->items.firstOrNull()}
+        .sortedBy{it.number}
+}
 private class AnimeSaltChromeClient(
     private val activity: ComponentActivity,
     private val onFullscreenChanged: (Boolean) -> Unit
