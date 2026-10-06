@@ -72,7 +72,7 @@ class MainActivity: ComponentActivity() {
 
 private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
 
-private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(0xFF101018),surfaceVariant=Color(0xFF191923),primary=Color(0xFFA56CFF),secondary=Color(0xFFE0D3FF))
+private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
 
 @Composable fun App() {
     MaterialTheme(colorScheme=colors) {
@@ -150,8 +150,8 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                         }
                         Spacer(Modifier.width(10.dp))
                         Column{
-                            Text("ANISTEAM",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Black,letterSpacing=2.sp)
-                            Text("STREAM WITHOUT THE NOISE",color=Color(0xFF6F6F7B),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=1.2.sp)
+                            Text("ANISTEAM",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black,letterSpacing=1.5.sp)
+                            Text("YOUR ANIME. YOUR WAY.",color=Color(0xFF777780),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
                         }
                     }
                 }
@@ -208,9 +208,9 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                     Column(
                         Modifier.align(Alignment.BottomStart).padding(22.dp)
                     ){
-                        Text("SPOTLIGHT",color=Color.White.copy(alpha=.72f),fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=2.2.sp)
+                        Text("FEATURED",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=2.2.sp)
                         Spacer(Modifier.height(7.dp))
-                        Text(featured.title,color=Color.White,fontSize=29.sp,fontWeight=FontWeight.ExtraBold,maxLines=2)
+                        Text(featured.title,color=Color.White,fontSize=31.sp,fontWeight=FontWeight.Black,maxLines=2,lineHeight=34.sp)
                         Spacer(Modifier.height(5.dp))
                         Text(
                             featured.type+"  •  "+featured.episodes+" episodes  •  ★ "+featured.score,
@@ -343,11 +343,11 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
     ){
         items(anime,key={it.slug}){item->
             Column(
-                Modifier.width(135.dp).clickable{onOpen(item.slug)}
+                Modifier.width(142.dp).clickable{onOpen(item.slug)}
             ){
                 AsyncImage(
                     item.image,item.title,
-                    Modifier.fillMaxWidth().height(188.dp).clip(RoundedCornerShape(15.dp)),
+                    Modifier.fillMaxWidth().height(202.dp).clip(RoundedCornerShape(16.dp)),
                     contentScale=ContentScale.Crop
                 )
                 Spacer(Modifier.height(8.dp))
@@ -361,13 +361,13 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
 @Composable private fun AnimeListCard(anime:Anime,onClick:()->Unit){
     Row(
         Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(17.dp)).background(Color(0xFF111117))
+            .clip(RoundedCornerShape(18.dp)).background(Color(0xFF111116))
             .clickable(onClick=onClick).padding(10.dp),
         verticalAlignment=Alignment.CenterVertically
     ){
         AsyncImage(
             anime.image,anime.title,
-            Modifier.size(72.dp,94.dp).clip(RoundedCornerShape(11.dp)),
+            Modifier.size(76.dp,100.dp).clip(RoundedCornerShape(12.dp)),
             contentScale=ContentScale.Crop
         )
         Spacer(Modifier.width(13.dp))
@@ -528,8 +528,8 @@ private val colors = darkColorScheme(background=Color(0xFF050509),surface=Color(
                         Spacer(Modifier.height(26.dp))
                         Row(verticalAlignment=Alignment.CenterVertically){
                             Column(Modifier.weight(1f)){
-                                Text("Episodes",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.ExtraBold)
-                                Text("Choose an episode to start watching",color=Color(0xFF777783),fontSize=10.sp)
+                                Text("Episodes",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black)
+                                Text("Pick up where you left off",color=Color(0xFF777783),fontSize=10.sp)
                             }
                             Text(eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
                         }
