@@ -61,7 +61,7 @@ import android.util.Base64
 
 private const val SOURCE = "https://animesalt.cx"
 
-data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="")
+data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class PlayerServer(val name:String,val url:String)
 data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
@@ -404,7 +404,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     LaunchedEffect(slug,anime){
         if(anime==null)return@LaunchedEffect
         loading=true;error=null
-        try{eps=fetchEpisodesBySlug(slug,anime!!.seasons)}
+        try{eps=if(anime!!.kind=="movie") fetchMovieEpisode(slug) else fetchEpisodesBySlug(slug,anime!!.seasons)}
         catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){error=e.message?:"Unable to load episodes."}
         finally{loading=false}
@@ -622,7 +622,11 @@ private suspend fun fetchHome()=withContext(Dispatchers.IO){
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
     return doc.select("a[href]").mapNotNull { a ->
         val href=a.absUrl("href").ifBlank { a.attr("href") }
-        val marker="/series/"
+        val marker=when {
+            href.contains("/series/",ignoreCase=true) -> "/series/"
+            href.contains("/movies/",ignoreCase=true) -> "/movies/"
+            else -> return@mapNotNull null
+        }
         val index=href.indexOf(marker)
         if(index<0) return@mapNotNull null
         val slug=href.substring(index+marker.length).trim('/').substringBefore('?').substringBefore('#')
@@ -631,13 +635,17 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
         val title=(a.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: container?.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: a.text()).trim()
         if(title.isBlank()) return@mapNotNull null
         val image=posterFrom(a.selectFirst("img") ?: container?.selectFirst("img"))
-        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt",1,slug)
+        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt",1,slug,if(marker=="/movies/") "movie" else "series")
     }.distinctBy{it.synopsis}
 }
 
 
 private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
-    val doc=getHtml("$BASE_URL/series/$slug/")
+    val seriesUrl="$BASE_URL/series/$slug/"
+    val movieUrl="$BASE_URL/movies/$slug/"
+    val seriesDoc=try{getHtml(seriesUrl)}catch(_:Exception){null}
+    val doc=if(seriesDoc?.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.isNotBlank()==true) seriesDoc else getHtml(movieUrl)
+    val kind=if(doc===seriesDoc) "series" else "movie"
     val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
     if(title.isBlank()) throw IllegalStateException("Anime not found")
     val description=doc.selectFirst(".description, .desc, [class*=description]")
@@ -650,7 +658,15 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt",seasonCount,slug)
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Movie".takeIf{kind=="movie"}?:"Anime",slug,"animesalt",if(kind=="movie") 1 else seasonCount,slug,kind)
+}
+
+private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
+    val url="$BASE_URL/movies/$slug/"
+    val doc=getHtml(url)
+    val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
+    if(title.isBlank()) return@withContext emptyList<Episode>()
+    listOf(Episode(1,title,"",url,animeSlug=slug))
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
