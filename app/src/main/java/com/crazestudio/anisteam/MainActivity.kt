@@ -36,7 +36,7 @@ import java.net.URLEncoder
 
 private const val SOURCE = "https://animesalt.cx"
 
-data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt")
+data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1)
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class Episode(val number:Int,val title:String,val aired:String)
 
@@ -84,9 +84,10 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 @Composable private fun Details(slug:String,onBack:()->Unit) {
     val context=LocalContext.current
-    var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)}
-    LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);eps=fetchEpisodesBySlug(slug)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("No authorized in-app playback URL is configured yet. Open the configured AnimeSalt.cx source website to continue.")},confirmButton={TextButton({chosen=null;context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("$BASE_URL/episode/$slug-1x${ep.number}/")))}){Text("Open source")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
+    var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingUrl by remember{mutableStateOf<String?>(null)}
+    LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
+    if(playingUrl!=null){SourcePlayer(playingUrl!!){playingUrl=null};return}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl="$BASE_URL/episode/$slug-${season}x1/"}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
@@ -95,7 +96,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
             anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=24.dp)){
                 item{
                     Row(Modifier.padding(18.dp)){AsyncImage(anime!!.image,anime!!.title,Modifier.width(135.dp).height(195.dp).clip(RoundedCornerShape(12.dp)),contentScale=ContentScale.Crop);Spacer(Modifier.width(16.dp));Column{Text(anime!!.title,color=Color.White,fontSize=21.sp,fontWeight=FontWeight.Bold);Text(anime!!.type+" • "+anime!!.episodes+" eps",color=Color.Gray);Text("★ "+anime!!.score,color=colors.secondary)}}
-                    Text("Synopsis",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp));Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB8B8C0),modifier=Modifier.padding(18.dp));Text("Episodes",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(18.dp,8.dp))
+                    Text("Synopsis",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=18.dp));Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB8B8C0),modifier=Modifier.padding(18.dp));Text("Episodes",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(18.dp,8.dp));if(anime!!.seasons>1){Row(Modifier.padding(horizontal=18.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){(1..anime!!.seasons).forEach{s->TextButton(onClick={season=s;loading=true;error=null},enabled=season!=s){Text("Season $s")}}};LaunchedEffect(season){try{eps=fetchEpisodesBySlug(slug,season)}catch(e:Exception){error=e.message}}}
                 }
                 items(eps){ep->Row(Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF111116)).clickable{chosen=ep}.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Text(ep.number.toString(),color=colors.secondary,fontWeight=FontWeight.Bold,modifier=Modifier.width(42.dp));Column(Modifier.weight(1f)){Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,maxLines=2);if(ep.aired.isNotBlank())Text(ep.aired,color=Color.Gray,fontSize=11.sp)};Text("▶",color=colors.primary)}}
             }
@@ -115,25 +116,28 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
     val encoded=URLEncoder.encode(q,"UTF-8")
     val doc=getHtml("$BASE_URL/?s=$encoded")
-    doc.select("#aa-movies li.series").mapNotNull { el ->
-        val link=el.selectFirst("a.lnk-blk")?.attr("href") ?: return@mapNotNull null
-        val id=link.trimEnd('/').substringAfterLast("/series/")
-        val title=el.selectFirst("h2.entry-title")?.text()?.trim().orEmpty()
-        val poster=posterFrom(el.selectFirst("img"))
-        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id,"animesalt")
-    }
+    extractSeries(doc).take(50)
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
     val doc=getHtml(BASE_URL)
-    val items=doc.select("#aa-movies li.series, #aa-movies li.movie").mapNotNull { el ->
-        val link=el.selectFirst("a.lnk-blk")?.attr("href") ?: return@mapNotNull null
-        val id=link.trimEnd('/').substringAfterLast("/series/").substringAfterLast("/movies/")
-        val title=el.selectFirst("h2.entry-title")?.text()?.trim().orEmpty()
-        val poster=posterFrom(el.selectFirst("img"))
-        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id)
-    }
-    items.distinctBy { it.synopsis }.take(30)
+    extractSeries(doc).distinctBy { it.synopsis }.take(50)
+}
+
+private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
+    return doc.select("a[href]").mapNotNull { a ->
+        val href=a.absUrl("href").ifBlank { a.attr("href") }
+        val marker="/series/"
+        val index=href.indexOf(marker)
+        if(index<0) return@mapNotNull null
+        val slug=href.substring(index+marker.length).trim('/').substringBefore('?').substringBefore('#')
+        if(slug.isBlank()) return@mapNotNull null
+        val container=a.closest("li, article, .item, .row, .item-list")
+        val title=(a.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: container?.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: a.text()).trim()
+        if(title.isBlank()) return@mapNotNull null
+        val image=posterFrom(a.selectFirst("img") ?: container?.selectFirst("img"))
+        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt")
+    }.distinctBy{it.synopsis}
 }
 
 
@@ -147,20 +151,37 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val quality=description?.select("p")?.firstOrNull { it.text().contains("Quality:") }?.text()?.substringAfter("Quality:")?.trim().orEmpty()
     val genres=doc.select(".genres a, [class*=genre] a").map { it.text().trim() }.filter { it.isNotBlank() }
     val year=doc.selectFirst(".year")?.text()?.trim().orEmpty()
-    val seasons=doc.selectFirst(".seasons")?.text()?.replace("Seasons","",ignoreCase=true)?.trim().orEmpty()
-    val episodes=doc.selectFirst(".entry-meta .episodes")?.text()?.replace("Episodes","",ignoreCase=true)?.trim().orEmpty()
+    val seasonCount=Regex("(\\d+)\\s+Seasons?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+    val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt")
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt",seasonCount)
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
     val doc=getHtml("$BASE_URL/episode/$slug-${season}x1/")
-    doc.select("#episode_by_temp li").mapNotNull { el ->
-        val raw=el.selectFirst(".num-epi")?.text()?.trim().orEmpty()
-        val parts=raw.split("x")
-        val ep=parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
-        Episode(ep,el.selectFirst(".entry-title")?.text()?.trim().orEmpty(),el.selectFirst("img")?.attr("alt").orEmpty())
+    val nodes=doc.select("#episode_by_temp li, a[href*=/episode/]")
+    nodes.mapNotNull { el ->
+        val text=el.text().trim()
+        val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
+        val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
+        val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
+        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty())
+    }.distinctBy{it.number}.sortedBy{it.number}
+}
+
+@Composable private fun SourcePlayer(url:String,onBack:()->Unit){
+    Column(Modifier.fillMaxSize().background(Color.Black)){
+        TextButton(onClick=onBack){Text("‹ Back",color=Color.White)}
+        AndroidView(factory={context->android.webkit.WebView(context).apply{
+            settings.javaScriptEnabled=true
+            settings.domStorageEnabled=true
+            settings.mediaPlaybackRequiresUserGesture=false
+            settings.loadsImagesAutomatically=true
+            settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            webViewClient=android.webkit.WebViewClient()
+            loadUrl(url)
+        }},modifier=Modifier.fillMaxSize())
     }
 }
 
