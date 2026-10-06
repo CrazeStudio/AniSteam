@@ -4,6 +4,9 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.view.View
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -274,77 +277,116 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
     }.distinctBy{it.url}.sortedBy{it.number}
 }
 
-@Composable private fun SourcePlayer(episode:Episode,episodes:List<Episode>,onBack:()->Unit,onEpisode:(Episode)->Unit){
-    val context=LocalContext.current
-    val activity=context as? ComponentActivity
-    var selectedServer by remember(episode.url){mutableStateOf(episode.servers.firstOrNull())}
-    var fullscreen by remember{mutableStateOf(false)}
-    val index=episodes.indexOfFirst{it.number==episode.number}
-    val previous=episodes.getOrNull(index-1)
-    val next=episodes.getOrNull(index+1)
+private class AnimeSaltChromeClient(
+    private val activity: ComponentActivity,
+    private val onFullscreenChanged: (Boolean) -> Unit
+) : WebChromeClient() {
+    private var customView: View? = null
+    private var customViewCallback: CustomViewCallback? = null
 
-    BackHandler{
-        if(fullscreen){
-            fullscreen=false
-            activity?.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }else onBack()
+    fun exitFullscreen() { onHideCustomView() }
+
+    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+        if (view == null) return
+        if (customView != null) {
+            callback?.onCustomViewHidden()
+            return
+        }
+        customView = view
+        customViewCallback = callback
+        val decor = activity.window.decorView as FrameLayout
+        decor.addView(view, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            decor.windowInsetsController?.hide(android.view.WindowInsets.Type.systemBars())
+            decor.windowInsetsController?.systemBarsBehavior =
+                android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            @Suppress("DEPRECATION")
+            decor.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
+        onFullscreenChanged(true)
     }
 
-    val server=selectedServer
+    override fun onHideCustomView() {
+        val view = customView ?: return
+        val decor = activity.window.decorView as FrameLayout
+        decor.removeView(view)
+        customView = null
+        customViewCallback?.onCustomViewHidden()
+        customViewCallback = null
+        activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            decor.windowInsetsController?.show(android.view.WindowInsets.Type.systemBars())
+        } else {
+            @Suppress("DEPRECATION")
+            decor.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+        }
+        onFullscreenChanged(false)
+    }
+}
+
+@Composable private fun SourcePlayer(
+    episode:Episode,
+    episodes:List<Episode>,
+    onBack:()->Unit,
+    onEpisode:(Episode)->Unit
+){
+    val context=LocalContext.current
+    val activity=context as ComponentActivity
+    var fullscreen by remember(episode.url){mutableStateOf(false)}
+    val chromeClient=remember(episode.url){
+        AnimeSaltChromeClient(activity){fullscreen=it}
+    }
+
+    BackHandler{
+        if(fullscreen) chromeClient.exitFullscreen() else onBack()
+    }
+
+    // Embed AnimeSalt's own player directly. AniSteam does not add a second
+    // player UI, server picker, episode navigation, or header underneath it.
+    val server=remember(episode.url,episode.servers){
+        episode.servers.firstOrNull{it.name.equals("Embedded",ignoreCase=true)}
+            ?: episode.servers.firstOrNull()
+    }
+
     if(server==null){
         Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
-            Column(horizontalAlignment=Alignment.CenterHorizontally){
-                Text("No public player found",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold)
-                Text("This episode exists, but AnimeSalt did not expose a playable server page.",color=Color.Gray,modifier=Modifier.padding(18.dp))
-                TextButton(onClick=onBack){Text("Back")}
-            }
+            Text("No public AnimeSalt player found",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
         }
         return
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Black)){
-        AndroidView(
-            factory={ctx->
-                android.webkit.WebView(ctx).apply{
-                    settings.javaScriptEnabled=true
-                    settings.domStorageEnabled=true
-                    settings.mediaPlaybackRequiresUserGesture=false
-                    settings.loadsImagesAutomatically=true
-                    settings.javaScriptCanOpenWindowsAutomatically=true
-                    settings.setSupportMultipleWindows(false)
-                    webViewClient=WebViewClient()
-                    webChromeClient=WebChromeClient()
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
-                }
-            },
-            update={webView->
-                if(webView.url!=server.url){
-                    webView.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
-                }
-            },
-            modifier=Modifier.fillMaxWidth().weight(1f)
-        )
-        Column(Modifier.fillMaxWidth().background(Color(0xFF0D0D12))){
-            PlayerHeader(
-                episode,
-                onBack,
-                {
-                    fullscreen=!fullscreen
-                    activity?.requestedOrientation=
-                        if(fullscreen) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                        else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                }
-            )
-            ServerPicker(episode.servers,server){selectedServer=it}
-            EpisodeNav(previous,next,onEpisode,episode)
-        }
-    }
+    AndroidView(
+        factory={ctx->
+            android.webkit.WebView(ctx).apply{
+                settings.javaScriptEnabled=true
+                settings.domStorageEnabled=true
+                settings.mediaPlaybackRequiresUserGesture=false
+                settings.loadsImagesAutomatically=true
+                settings.javaScriptCanOpenWindowsAutomatically=true
+                settings.setSupportMultipleWindows(false)
+                webViewClient=WebViewClient()
+                webChromeClient=chromeClient
+                setBackgroundColor(android.graphics.Color.BLACK)
+                loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
+            }
+        },
+        update={webView->
+            if(webView.url!=server.url && !fullscreen){
+                webView.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
+            }
+        },
+        modifier=Modifier.fillMaxSize().background(Color.Black)
+    )
 }
 
-@Composable private fun PlayerHeader(episode:Episode,onBack:()->Unit,onFullscreen:()->Unit){Row(Modifier.fillMaxWidth().background(Color(0xFF0D0D12)).padding(horizontal=8.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically){TextButton(onClick=onBack){Text("‹ Back",color=Color.White)};Column(Modifier.weight(1f)){Text("AniSteam Player",color=Color.White,fontWeight=FontWeight.Bold);Text("Episode ${episode.number} • ${episode.title.ifBlank{"AnimeSalt"}}",color=Color.Gray,fontSize=11.sp,maxLines=1)};TextButton(onClick=onFullscreen){Text("FULL",color=Color.White,fontSize=11.sp)}}}
-@Composable private fun ServerPicker(servers:List<PlayerServer>,selected:PlayerServer,onSelect:(PlayerServer)->Unit){if(servers.size>1)Row(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=7.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)){servers.forEachIndexed{index,server->Text(server.name.ifBlank{"Server ${index+1}"},modifier=Modifier.clip(RoundedCornerShape(20.dp)).background(if(server.url==selected.url)colors.primary else Color(0xFF202027)).clickable{onSelect(server)}.padding(horizontal=14.dp,vertical=8.dp),color=Color.White,fontSize=12.sp,fontWeight=FontWeight.SemiBold)}}}
-@Composable private fun EpisodeNav(previous:Episode?,next:Episode?,onEpisode:(Episode)->Unit,episode:Episode){Row(Modifier.fillMaxWidth().padding(7.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){TextButton(onClick={previous?.let(onEpisode)},enabled=previous!=null){Text("Previous")};Text("EP ${episode.number}",color=Color.White,fontWeight=FontWeight.Bold);TextButton(onClick={next?.let(onEpisode)},enabled=next!=null){Text("Next")}}}
 private fun fetchPlayerServers(url:String):List<PlayerServer>{
     // AniSteam embeds AnimeSalt's real server/player pages only.
     // It never extracts a raw media URL or substitutes its own player.
