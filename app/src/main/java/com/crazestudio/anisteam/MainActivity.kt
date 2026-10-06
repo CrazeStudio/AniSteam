@@ -34,32 +34,36 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-private const val API = "https://api.tenrai.org/v1"
 private const val SOURCE = "https://animesalt.cx"
 
-data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="")
+data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt")
+data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class Episode(val number:Int,val title:String,val aired:String)
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
 }
 
+private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
+
 private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(0xFF111116),primary=Color(0xFF9B6CFF),secondary=Color(0xFFC7B5FF))
 
 @Composable fun App() {
     MaterialTheme(colorScheme=colors) {
         var selected by remember { mutableStateOf<String?>(null) }
-        if (selected == null) Home { slug -> selected=slug } else Details(selected!!){ selected=null }
+        var showSources by remember { mutableStateOf(false) }
+        if (selected == null) Home(onOpen = { slug -> selected=slug }, onSources = { showSources=true }) else Details(selected!!){ selected=null }
+        if (showSources) SourceDialog(onDismiss = { showSources=false })
     }
 }
 
-@Composable private fun Home(onOpen:(String)->Unit) {
+@Composable private fun Home(onOpen:(String)->Unit, onSources:()->Unit) {
     var q by remember { mutableStateOf("") }; var submitted by remember { mutableStateOf("") }
     var data by remember { mutableStateOf<List<Anime>>(emptyList()) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(submitted) { loading=true;error=null;try{data=fetchAnime(submitted)}catch(e:Exception){error=e.message?:"Unable to load anime."}finally{loading=false} }
     Column(Modifier.fillMaxSize().background(colors.background)) {
         Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment=Alignment.CenterVertically){Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));Text("DISCOVER",color=colors.primary,fontSize=12.sp,fontWeight=FontWeight.Bold)}
+            Row(verticalAlignment=Alignment.CenterVertically){Text("AniSteam",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold);Spacer(Modifier.weight(1f));TextButton(onClick=onSources){Text("SOURCES",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)}}
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(value=q,onValueChange={q=it},modifier=Modifier.fillMaxWidth(),singleLine=true,placeholder={Text("Search anime...",color=Color.Gray)},trailingIcon={if(q.isNotBlank())TextButton({submitted=q.trim()}){Text("Search")}})
             Spacer(Modifier.height(12.dp))
@@ -101,6 +105,12 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 private const val BASE_URL = "https://animesalt.cx"
 
+@Composable private fun SourceDialog(onDismiss:()->Unit) {
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Sources")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){SOURCES.forEach { source ->
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D)).padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(source.name,color=Color.White,fontWeight=FontWeight.Bold);Text(source.baseUrl,color=Color.Gray,fontSize=11.sp)};Text(if(source.enabled)"ON" else "OFF",color=colors.secondary,fontWeight=FontWeight.Bold)}
+    }}},confirmButton={TextButton(onClick=onDismiss){Text("Done")}})
+}
+
 private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
     val encoded=URLEncoder.encode(q,"UTF-8")
@@ -110,7 +120,7 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
         val id=link.trimEnd('/').substringAfterLast("/series/")
         val title=el.selectFirst("h2.entry-title")?.text()?.trim().orEmpty()
         val poster=posterFrom(el.selectFirst("img"))
-        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id)
+        if(id.isBlank()||title.isBlank()) null else Anime(id.hashCode(),title,poster,"—","?","Anime",id,"animesalt")
     }
 }
 
@@ -148,7 +158,7 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val episodes=doc.selectFirst(".entry-meta .episodes")?.text()?.replace("Episodes","",ignoreCase=true)?.trim().orEmpty()
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug)
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt")
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
