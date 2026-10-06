@@ -609,9 +609,26 @@ private const val BASE_URL = "https://animesalt.cx"
 
 private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
-    val encoded=URLEncoder.encode(q,"UTF-8")
-    val doc=getHtml("$BASE_URL/?s=$encoded")
-    extractSeries(doc).take(50)
+
+    // AnimeSalt's WordPress search can be strict when a user types natural
+    // language such as "doraemon new movie in india". Search the full query
+    // first, then retry with the strongest term if that produces no results.
+    fun search(term:String):List<Anime>{
+        val encoded=URLEncoder.encode(term,"UTF-8")
+        return extractSeries(getHtml("$BASE_URL/?s=$encoded"))
+    }
+
+    val exact=search(q)
+    if(exact.isNotEmpty()) return@withContext exact.take(50)
+
+    val fallback=q.split(Regex("\\s+"))
+        .map{it.trim()}
+        .filter{it.length>=4}
+        .maxByOrNull{it.length}
+        ?: q.trim()
+
+    if(fallback.equals(q.trim(),ignoreCase=true)) emptyList()
+    else search(fallback).take(50)
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
