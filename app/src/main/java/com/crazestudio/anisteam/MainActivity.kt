@@ -136,13 +136,6 @@ private suspend fun fetchHome()=withContext(Dispatchers.IO){
     items.distinctBy { it.synopsis }.take(30)
 }
 
-private suspend fun fetchDetails(id:Int)=withContext(Dispatchers.IO){
-    throw IllegalStateException("Direct source IDs are loaded from search results; open an anime from Search.")
-}
-
-private suspend fun fetchEpisodes(id:Int)=withContext(Dispatchers.IO){
-    emptyList<Episode>()
-}
 
 private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val doc=getHtml("$BASE_URL/series/$slug/")
