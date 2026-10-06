@@ -37,7 +37,7 @@ import java.net.URLEncoder
 
 private const val SOURCE = "https://animesalt.cx"
 
-data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1)
+data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val playerUrl:String="")
 
@@ -74,7 +74,7 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
             loading->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){CircularProgressIndicator()}
             error!=null->Box(Modifier.fillMaxSize().padding(24.dp),contentAlignment=Alignment.Center){Text("Unable to load catalog.\n"+error!!,color=Color.LightGray)}
             else->LazyVerticalGrid(columns=GridCells.Fixed(2),contentPadding=PaddingValues(14.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-                items(data){item->Column(Modifier.clickable{onOpen(item.synopsis)}){Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D))){
+                items(data){item->Column(Modifier.clickable{onOpen(item.slug)}){Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF17171D))){
                     AsyncImage(item.image,item.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
                     Text("★ "+item.score,color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold,modifier=Modifier.align(Alignment.TopStart).padding(8.dp).background(Color(0xCC0B0B0F),RoundedCornerShape(7.dp)).padding(7.dp,4.dp))
                 };Spacer(Modifier.height(7.dp));Text(item.title,color=Color.White,fontWeight=FontWeight.SemiBold,maxLines=2);Text(item.type+" • "+item.episodes+" eps",color=Color.Gray,fontSize=11.sp)}}
@@ -85,10 +85,10 @@ private val colors = darkColorScheme(background=Color(0xFF07070A),surface=Color(
 
 @Composable private fun Details(slug:String,onBack:()->Unit) {
     val context=LocalContext.current
-    var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingUrl by remember{mutableStateOf<String?>(null)}
-    LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}
-    if(playingUrl!=null){SourcePlayer(playingUrl!!){playingUrl=null};return}
-    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Play this episode from AnimeSalt inside AniSteam.")},confirmButton={TextButton({chosen=null;playingUrl=ep.playerUrl.ifBlank { ep.url.ifBlank { "$BASE_URL/episode/$slug-${season}x1/" } }}){Text("Play")}},dismissButton={TextButton({chosen=null}){Text("Cancel")}})}
+    var anime by remember { mutableStateOf<Anime?>(null) };var eps by remember { mutableStateOf<List<Episode>>(emptyList()) };var loading by remember{mutableStateOf(true)};var error by remember{mutableStateOf<String?>(null)};var chosen by remember{mutableStateOf<Episode?>(null)};var season by remember{mutableIntStateOf(1)};var playingEpisode by remember{mutableStateOf<Episode?>(null)};var playerLoading by remember{mutableStateOf(false)};var playerError by remember{mutableStateOf<String?>(null)}
+    LaunchedEffect(slug){loading=true;try{anime=fetchDetailsBySlug(slug);season=1;eps=fetchEpisodesBySlug(slug,1)}catch(e:Exception){error=e.message?:"Unable to load details."}finally{loading=false}}\n    LaunchedEffect(playingEpisode){ val ep=playingEpisode ?: return@LaunchedEffect; playerLoading=true; playerError=null; val ok=withContext(Dispatchers.IO){checkEpisodeAvailable(ep.url)}; if(!ok) playerError="AnimeSalt did not expose a playable iframe for this episode."; playerLoading=false }
+    if(playingEpisode!=null){if(playerLoading){Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){CircularProgressIndicator()}}else if(playerError!=null){Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text("Anime not available in our server",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(10.dp));Text(playerError!!,color=Color.Gray);Spacer(Modifier.height(18.dp));TextButton(onClick={playingEpisode=null;playerError=null}){Text("Back")}}}}else{SourcePlayer(playingEpisode!!.url){playingEpisode=null}};return}
+    chosen?.let{ep->AlertDialog(onDismissRequest={chosen=null},title={Text("Episode "+ep.number)},text={Text("Check AnimeSalt and open its real embedded player.")},confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("Play")}},dismissButton={TextButton(onClick={chosen=null}){Text("Cancel")}})}
     Column(Modifier.fillMaxSize().background(colors.background)){
         TextButton(onClick=onBack,modifier=Modifier.padding(8.dp)){Text("‹ Back")}
         when{
@@ -137,7 +137,7 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
         val title=(a.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: container?.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: a.text()).trim()
         if(title.isBlank()) return@mapNotNull null
         val image=posterFrom(a.selectFirst("img") ?: container?.selectFirst("img"))
-        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt")
+        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt",1,slug)
     }.distinctBy{it.synopsis}
 }
 
@@ -156,7 +156,7 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt",seasonCount)
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Anime",slug,"animesalt",seasonCount,slug)
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
@@ -169,11 +169,11 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         val raw=el.selectFirst(".num-epi")?.text()?.trim() ?: Regex("${season}x(\\d+)").find(text)?.value.orEmpty()
         val ep=Regex("${season}x(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: el.selectFirst(".num-epi")?.text()?.filter{it.isDigit()}?.toIntOrNull() ?: return@mapNotNull null
         val title=(el.selectFirst(".entry-title,h2,h3")?.text() ?: text.replace(Regex("${season}x\\d+"),"").trim()).trim()
-        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() },playerUrl)
+        Episode(ep,title,el.selectFirst("img")?.attr("alt").orEmpty(),el.absUrl("href").ifBlank { el.selectFirst("a[href]")?.absUrl("href").orEmpty() })
     }.distinctBy{it.number}.sortedBy{it.number}
 }
 
-@Composable private fun SourcePlayer(url:String,onBack:()->Unit){
+private fun checkEpisodeAvailable(url:String):Boolean{ return try{ getHtml(url).selectFirst("iframe[src]") != null }catch(_:Exception){ false } }\n\n@Composable private fun SourcePlayer(url:String,onBack:()->Unit){
     var failed by remember(url){mutableStateOf<String?>(null)}
     Column(Modifier.fillMaxSize().background(Color.Black)){
         Row(Modifier.fillMaxWidth().padding(6.dp),verticalAlignment=Alignment.CenterVertically){
@@ -220,7 +220,7 @@ private fun getHtml(url:String):org.jsoup.nodes.Document{
         .userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36")
         .header("Accept","text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
         .header("Accept-Language","en-US,en;q=0.9")
-        .referrer("https://toonstream.dad/")
+        .referrer("$BASE_URL/")
         .timeout(15000)
         .get()
 }
