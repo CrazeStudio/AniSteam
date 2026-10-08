@@ -930,14 +930,36 @@ private fun fetchPlayerServers(url:String):List<PlayerServer>{
     return result.distinctBy{it.url}
 }
 
+private val sourceHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+}
+
 private fun getHtml(url:String):org.jsoup.nodes.Document{
-    return org.jsoup.Jsoup.connect(url)
-        .userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36")
+    val request=okhttp3.Request.Builder()
+        .url(url)
+        .header("User-Agent","Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36")
         .header("Accept","text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
         .header("Accept-Language","en-US,en;q=0.9")
-        .referrer("$BASE_URL/")
-        .timeout(15000)
-        .get()
+        .header("Cache-Control","no-cache")
+        .header("Referer","$BASE_URL/")
+        .build()
+
+    val response=sourceHttpClient.newCall(request).execute()
+    response.use {
+        if(!it.isSuccessful){
+            throw java.io.IOException("AnimeSalt HTTP \${it.code} for $url")
+        }
+        val body=it.body.string()
+        if(body.isBlank()) throw java.io.IOException("AnimeSalt returned an empty page")
+        return org.jsoup.Jsoup.parse(body,url)
+    }
 }
 
 private fun posterFrom(img:org.jsoup.nodes.Element?):String{
