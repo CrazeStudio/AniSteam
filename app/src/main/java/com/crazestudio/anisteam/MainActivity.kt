@@ -472,7 +472,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         val ep=playingEpisode?:return@LaunchedEffect
         playerLoading=true;playerError=null
         try{
-            val servers=withContext(Dispatchers.IO){fetchPlayableMedia(ep.url)}
+            val servers=withContext(Dispatchers.IO){fetchEmbeddedPlayer(ep.url)}
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if(servers.isEmpty()) playerError="No public player was found for this episode."
             else{
@@ -511,7 +511,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     }
                 }
             }
-        }else SourcePlayer(playingEpisode!!,eps,onBack={playingEpisode=null},onEpisode={playingEpisode=it})
+        }else SourceWebPlayer(playingEpisode!!, playingEpisode!!.servers.first(), eps, onBack={playingEpisode=null}, onEpisode={playingEpisode=it})
         return
     }
 
@@ -995,73 +995,24 @@ private class AnimeSaltChromeClient(
 @Composable private fun SourceWebPlayer(
     episode:Episode,
     server:PlayerServer,
+    episodes:List<Episode>,
     onBack:()->Unit,
     onEpisode:(Episode)->Unit
 ){
     val context=LocalContext.current
     val activity=context as ComponentActivity
-    var webView by remember{mutableStateOf<android.webkit.WebView?>(null)}
-    var fullscreen by remember{mutableStateOf(false)}
-    var controlsVisible by remember{mutableStateOf(true)}
-    var isPlaying by remember{mutableStateOf(false)}
-    var playerReady by remember{mutableStateOf(false)}
-    var positionSeconds by remember{mutableFloatStateOf(0f)}
-    var durationSeconds by remember{mutableFloatStateOf(0f)}
-    var scrubbing by remember{mutableStateOf(false)}
-    val chromeClient=remember(activity){AnimeSaltChromeClient(activity){fullscreen=it}}
+    val chromeClient=remember(activity){
+        AnimeSaltChromeClient(activity){ /* embedded player owns its playback UI */ }
+    }
+    val ordered=remember(episodes){episodes.sortedBy{it.number}}
+    val currentIndex=ordered.indexOfFirst{it.url==episode.url}
+    val previous=ordered.getOrNull(currentIndex-1)
+    val next=ordered.getOrNull(currentIndex+1)
 
-    fun runPlayerJs(script:String){webView?.evaluateJavascript(script,null)}
-
-    DisposableEffect(webView){
-        onDispose{
-            chromeClient.exitFullscreen()
-            webView?.stopLoading()
-            webView?.webChromeClient=null
-            webView?.destroy()
-            webView=null
-        }
+    DisposableEffect(episode.url,server.url){
+        onDispose{chromeClient.exitFullscreen()}
     }
-    LaunchedEffect(webView){
-        while(true){
-            val current=webView
-            if(current!=null){
-                val script="""(function(){
-                    try {
-                      var p=(typeof jwplayer==='function')?jwplayer():null;
-                      var video=document.querySelector('video');
-                      var ready=false, position=0, duration=0, state='loading';
-                      if(p && p.getState){ready=true;state=p.getState()||'';position=p.getPosition()||0;duration=p.getDuration()||0;}
-                      else if(video){ready=video.readyState>=1;position=video.currentTime||0;duration=Number.isFinite(video.duration)?video.duration:0;state=video.paused?'paused':'playing';}
-                      var root=document.head||document.documentElement;
-                      if(root && !document.getElementById('anisteam-player-style')){
-                        var st=document.createElement('style');st.id='anisteam-player-style';
-                        st.textContent='.jw-controlbar,.jw-display,.jw-title,.jw-rightclick{display:none!important}.jw-preview{background-size:contain!important}';
-                        root.appendChild(st);
-                      }
-                      return JSON.stringify({ready:ready,p:position,d:duration,s:state});
-                    } catch(e) { return JSON.stringify({ready:false,p:0,d:0,s:'loading'}); }
-                })()"""
-                current.evaluateJavascript(script){raw->
-                    try{
-                        val value=org.json.JSONTokener(raw).nextValue()
-                        val json=if(value is String) JSONObject(value) else value as? JSONObject
-                        if(json!=null){
-                            playerReady=json.optBoolean("ready",false)
-                            isPlaying=json.optString("s","").equals("playing",true)
-                            if(!scrubbing){
-                                positionSeconds=json.optDouble("p",0.0).toFloat().coerceAtLeast(0f)
-                                durationSeconds=json.optDouble("d",0.0).toFloat().coerceAtLeast(0f)
-                            }
-                        }
-                    }catch(_:Exception){}
-                }
-            }
-            kotlinx.coroutines.delay(650)
-        }
-    }
-    LaunchedEffect(controlsVisible,isPlaying){
-        if(controlsVisible && isPlaying){kotlinx.coroutines.delay(4500);controlsVisible=false}
-    }
+    BackHandler{onBack()}
 
     Box(Modifier.fillMaxSize().background(Color.Black)){
         AndroidView(
@@ -1085,82 +1036,69 @@ private class AnimeSaltChromeClient(
                             val target=request.url
                             return !(target.scheme.equals("https",true)||target.scheme.equals("http",true))
                         }
-                        override fun onPageFinished(view:android.webkit.WebView,url:String){
-                            super.onPageFinished(view,url)
-                            view.evaluateJavascript("(function(){var s=document.createElement('style');s.id='anisteam-player-style';s.textContent='.jw-controlbar,.jw-display,.jw-title,.jw-rightclick{display:none!important}';(document.head||document.documentElement).appendChild(s);return true;})()",null)
-                        }
                     }
-                    webView=this
+                    tag=server.url
                     loadUrl(server.url,mapOf("Referer" to episode.url))
                 }
             },
-            update={view->if(webView!==view)webView=view},
+            update={view->
+                if(view.tag!=server.url){
+                    view.tag=server.url
+                    view.loadUrl(server.url,mapOf("Referer" to episode.url))
+                }
+            },
             modifier=Modifier.fillMaxSize()
         )
-        // Avoid blocking taps intended for the embedded video.
-        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(112.dp).background(Brush.verticalGradient(listOf(Color(0xB8000000),Color.Transparent))).clickable{controlsVisible=!controlsVisible})
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(100.dp).background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xD9000000)))).clickable{controlsVisible=!controlsVisible})
-        if(controlsVisible){
-            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal=14.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
-                Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x880D0D12)){
-                    Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)){
-                    Text("ANISTEAM PLAYER",color=Color(0xFFFFA16F),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.4.sp)
-                    Text(episode.title.ifBlank{"Episode "+episode.number},color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold,maxLines=1)
-                    Text(server.name,color=Color(0xFFB8B8C4),fontSize=10.sp,maxLines=1)
-                }
-                TextButton(onClick={runPlayerJs("try{if(typeof jwplayer==='function')jwplayer().setFullscreen(true)}catch(e){}")}){Text("FULL",color=Color.White,fontWeight=FontWeight.Bold,fontSize=10.sp)}
-            }
-            if(!playerReady)CircularProgressIndicator(Modifier.align(Alignment.Center).size(38.dp),color=Color(0xFFFF7A18),strokeWidth=3.dp)
-            Row(Modifier.align(Alignment.Center).padding(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(22.dp),verticalAlignment=Alignment.CenterVertically){
-                Surface(onClick={
-                    runPlayerJs("try{if(typeof jwplayer==='function')jwplayer().seek(Math.max(0,jwplayer().getPosition()-10))}catch(e){}")
-                    controlsVisible=true
-                },shape=RoundedCornerShape(50),color=Color(0x990D0D12)){
-                    Box(Modifier.size(52.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold)}
-                }
-                Surface(onClick={
-                    val command=if(isPlaying) "pause" else "play"
-                    runPlayerJs("""(function(){try{
-                      if(typeof jwplayer==='function'){try{var p=jwplayer();if(p&&p.getState){if('$command'==='pause')p.pause();else p.play();return;}}catch(e){}}
-                      if(typeof vload==='function' && '$command'==='play'){try{vload()}catch(e){}}
-                      var videos=Array.from(document.querySelectorAll('video'));
-                      videos.forEach(function(v){try{if('$command'==='pause')v.pause();else{var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;v.play().catch(function(){});});}}catch(e){}});
-                      if('$command'==='play' && videos.length===0){var b=Array.from(document.querySelectorAll('button,[role=button]')).find(function(x){return /play/i.test((x.getAttribute('aria-label')||'')+' '+(x.title||'')+' '+(x.innerText||''))});if(b)b.click();}
-                    }catch(e){}})()""")
-                    controlsVisible=true
-                },shape=RoundedCornerShape(50),color=Color(0xFFFF7A18)){
-                    Box(Modifier.size(70.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=24.sp,fontWeight=FontWeight.Bold)}
-                }
-                Surface(onClick={
-                    runPlayerJs("try{jwplayer().seek(Math.min(jwplayer().getDuration()||1e12,jwplayer().getPosition()+10))}catch(e){}")
-                    controlsVisible=true
-                },shape=RoundedCornerShape(50),color=Color(0x990D0D12)){
-                    Box(Modifier.size(52.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold)}
+
+        Row(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color(0xB8000000),Color.Transparent)))
+                .padding(horizontal=12.dp,vertical=10.dp),
+            verticalAlignment=Alignment.CenterVertically
+        ){
+            Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x990D0D12)){
+                Box(Modifier.size(40.dp),contentAlignment=Alignment.Center){
+                    Text("‹",color=Color.White,fontSize=28.sp)
                 }
             }
-            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal=18.dp,vertical=16.dp)){
-                Slider(
-                    value=if(durationSeconds>0f)(positionSeconds/durationSeconds).coerceIn(0f,1f)else 0f,
-                    onValueChange={fraction->scrubbing=true;if(durationSeconds>0f)positionSeconds=fraction*durationSeconds},
-                    onValueChangeFinished={
-                        runPlayerJs("try{jwplayer().seek("+positionSeconds.coerceAtLeast(0f)+")}catch(e){}")
-                        scrubbing=false
-                    },
-                    enabled=durationSeconds>0f,
-                    colors=SliderDefaults.colors(thumbColor=Color(0xFFFF7A18),activeTrackColor=Color(0xFFFF7A18),inactiveTrackColor=Color(0x66777780)),
-                    modifier=Modifier.fillMaxWidth().height(28.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)){
+                Text("ANISTEAM",color=Color(0xFFFFA16F),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.3.sp)
+                Text(episode.title.ifBlank{"Episode "+episode.number},color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold,maxLines=1)
+            }
+        }
+
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xE6000000))))
+                .padding(horizontal=16.dp,vertical=18.dp),
+            horizontalArrangement=Arrangement.spacedBy(12.dp),
+            verticalAlignment=Alignment.CenterVertically
+        ){
+            Button(
+                onClick={previous?.let{onEpisode(it)}},
+                enabled=previous!=null,
+                modifier=Modifier.weight(1f),
+                shape=RoundedCornerShape(13.dp),
+                colors=ButtonDefaults.buttonColors(
+                    containerColor=Color(0xFF22222B),
+                    contentColor=Color.White,
+                    disabledContainerColor=Color(0xFF15151B),
+                    disabledContentColor=Color(0xFF666671)
                 )
-                Row(verticalAlignment=Alignment.CenterVertically){
-                    Text(formatPlayerTime((positionSeconds*1000).toLong()),color=Color.White,fontSize=11.sp,fontWeight=FontWeight.SemiBold)
-                    Text(" / ",color=Color(0xFF888892),fontSize=11.sp)
-                    Text(formatPlayerTime((durationSeconds*1000).toLong()),color=Color(0xFFB6B6C0),fontSize=11.sp)
-                    Spacer(Modifier.weight(1f))
-                    Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-                }
-            }
+            ){ Text("‹  Previous video",fontSize=12.sp,fontWeight=FontWeight.Bold) }
+            Button(
+                onClick={next?.let{onEpisode(it)}},
+                enabled=next!=null,
+                modifier=Modifier.weight(1f),
+                shape=RoundedCornerShape(13.dp),
+                colors=ButtonDefaults.buttonColors(
+                    containerColor=colors.primary,
+                    contentColor=Color.White,
+                    disabledContainerColor=Color(0xFF15151B),
+                    disabledContentColor=Color(0xFF666671)
+                )
+            ){ Text("Next video  ›",fontSize=12.sp,fontWeight=FontWeight.Bold) }
         }
     }
 }
@@ -1331,6 +1269,54 @@ private fun formatPlayerTime(milliseconds:Long):String{
     val seconds=(milliseconds.coerceAtLeast(0L)/1000L).toInt()
     val hours=seconds/3600;val minutes=(seconds%3600)/60;val remainder=seconds%60
     return if(hours>0)String.format("%d:%02d:%02d",hours,minutes,remainder)else String.format("%02d:%02d",minutes,remainder)
+}
+
+private fun fetchEmbeddedPlayer(episodeUrl:String):List<PlayerServer>{
+    val doc=getHtml(episodeUrl)
+    val pageUrl=doc.location().ifBlank{episodeUrl}
+    fun resolve(raw:String):String{
+        val cleaned=raw.trim().replace("&amp;","&")
+        return try{URL(URL(pageUrl),cleaned).toString()}catch(_:Exception){cleaned}
+    }
+    val candidates=linkedMapOf<String,PlayerServer>()
+    val nodes=doc.select(
+        "iframe[src], iframe[data-src], iframe[data-lazy-src], " +
+        "[data-embed], [data-iframe], a[href*='ravok.buzz/video/']"
+    )
+    fun add(raw:String,label:String){
+        if(raw.isBlank())return
+        val url=resolve(raw)
+        val parsed=try{Uri.parse(url)}catch(_:Exception){return}
+        if(parsed.scheme !in listOf("http","https") || parsed.host.isNullOrBlank())return
+        if(url==pageUrl || url==episodeUrl)return
+        candidates.putIfAbsent(url,PlayerServer(label,url,episodeUrl))
+    }
+    // Prefer the known embedded video host when it is present.
+    nodes.forEach{node->
+        val raw=when{
+            node.hasAttr("data-embed")->node.attr("data-embed")
+            node.hasAttr("data-iframe")->node.attr("data-iframe")
+            node.hasAttr("data-src")->node.attr("data-src")
+            node.hasAttr("data-lazy-src")->node.attr("data-lazy-src")
+            node.hasAttr("src")->node.attr("src")
+            else->node.attr("href")
+        }
+        if(raw.contains("ravok.buzz/video/",ignoreCase=true))add(raw,"Embedded player")
+    }
+    if(candidates.isEmpty()){
+        nodes.forEach{node->
+            val raw=when{
+                node.hasAttr("data-embed")->node.attr("data-embed")
+                node.hasAttr("data-iframe")->node.attr("data-iframe")
+                node.hasAttr("data-src")->node.attr("data-src")
+                node.hasAttr("data-lazy-src")->node.attr("data-lazy-src")
+                node.hasAttr("src")->node.attr("src")
+                else->node.attr("href")
+            }
+            add(raw,"Embedded player")
+        }
+    }
+    return candidates.values.take(4).toList()
 }
 
 private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
