@@ -755,28 +755,31 @@ private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
-    return doc.select("a[href]").mapNotNull { a ->
-        val href=a.absUrl("href").ifBlank { a.attr("href") }.substringBefore('?').substringBefore('#').trimEnd('/')
-        val marker=when {
-            href.contains("/series/",ignoreCase=true) -> "/series/"
-            href.contains("/movies/",ignoreCase=true) -> "/movies/"
-            href.contains("/tv/",ignoreCase=true) -> "/tv/"
-            href.contains("/movie/",ignoreCase=true) -> "/movie/"
-            else -> return@mapNotNull null
-        }
-        val index=href.indexOf(marker)
-        if(index<0) return@mapNotNull null
-        val tail=href.substring(index+marker.length).trim('/')
-        if(tail.isBlank() || tail.contains("/")) return@mapNotNull null
-        val path=marker.removePrefix("/") + tail
-        val container=a.closest("li, article, .item, .row, .item-list, .post, .anime-card, .film")
-        val title=(a.selectFirst("h2,h3,h4,.entry-title,.title,.name")?.text()
-            ?: container?.selectFirst("h2,h3,h4,.entry-title,.title,.name")?.text()
-            ?: a.attr("title").ifBlank { a.text() }).replace(Regex("\\s+")," ").trim()
+    val anchors=linkedMapOf<String,org.jsoup.nodes.Element>()
+    doc.select("a[href], [data-href], [data-url]").forEach { element ->
+        val raw=element.attr("href").ifBlank { element.attr("data-href") }.ifBlank { element.attr("data-url") }
+        if(raw.isBlank()) return@forEach
+        val resolved=try{java.net.URI(BASE_URL).resolve(raw).toString()}catch(_:Exception){raw}
+        val href=resolved.substringBefore('?').substringBefore('#').trimEnd('/')
+        val marker=listOf("/series/","/movies/","/tv/","/movie/").firstOrNull{href.contains(it,ignoreCase=true)} ?: return@forEach
+        val tail=href.substringAfter(marker).trim('/')
+        if(tail.isBlank() || tail.contains("/")) return@forEach
+        val anchor=if(element.tagName()=="a") element else element.selectFirst("a[href]") ?: element
+        anchors.putIfAbsent(href,anchor)
+    }
+    return anchors.mapNotNull { (href,a) ->
+        val marker=listOf("/series/","/movies/","/tv/","/movie/").firstOrNull{href.contains(it,ignoreCase=true)} ?: return@mapNotNull null
+        val slug=href.substringAfter(marker).trim('/')
+        if(slug.isBlank()) return@mapNotNull null
+        val container=a.closest("li, article, .item, .row, .item-list, .post, .anime-card, .film, .movie-item, .series-item, .flw-item, .bs") ?: a.parent()
+        val imageElement=a.selectFirst("img, source") ?: container?.selectFirst("img, source")
+        val title=(a.selectFirst("h2,h3,h4,.entry-title,.title,.name,.film-name,.tt")?.text()
+            ?: container?.selectFirst("h2,h3,h4,.entry-title,.title,.name,.film-name,.tt")?.text()
+            ?: a.attr("title").ifBlank { a.attr("aria-label").ifBlank { a.text() } })
+            .replace(Regex("\\s+")," ").trim()
         if(title.isBlank()) return@mapNotNull null
-        val image=posterFrom(a.selectFirst("img") ?: container?.selectFirst("img"))
         val kind=if(marker.contains("movie",ignoreCase=true)) "movie" else "series"
-        Anime(path.hashCode(),title,image,"—","?","Anime",path,"animesalt",1,path,kind)
+        Anime(slug.hashCode(),title,posterFrom(imageElement),"—","?","Anime",slug,"animesalt",1,slug,kind)
     }.distinctBy{it.kind+":"+it.slug}
 }
 
@@ -822,69 +825,56 @@ private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
     val normalized=slug.trim('/')
     val prefix=normalized.substringBefore('/')
-    val candidates=if(prefix in listOf("tv","series")) listOf("$BASE_URL/$normalized/") else listOf(
-        "$BASE_URL/series/$normalized/",
-        "$BASE_URL/tv/$normalized/"
-    )
-    var loaded:org.jsoup.nodes.Document?=null
+    val candidates=if(prefix in listOf("tv","series")) listOf("$BASE_URL/$normalized/") else listOf("$BASE_URL/series/$normalized/","$BASE_URL/tv/$normalized/")
+    var seriesDoc:org.jsoup.nodes.Document?=null
     var lastError:Exception?=null
     for(url in candidates){
         try{
-            val doc=getHtml(url)
-            val hasTitle=doc.selectFirst("h1.entry-title, .fg1 .entry-title, h1")?.text()?.isNotBlank()==true
-            val hasEpisodes=doc.select("a[href*=/episode/]").isNotEmpty()
-            if(hasTitle || hasEpisodes){ loaded=doc; if(hasEpisodes) break }
+            val candidate=getHtml(url)
+            val hasTitle=candidate.selectFirst("h1.entry-title, .fg1 .entry-title, h1")?.text()?.isNotBlank()==true
+            val hasEpisodes=candidate.select("a[href*=/episode/]").isNotEmpty()
+            if(hasTitle || hasEpisodes){seriesDoc=candidate;if(hasEpisodes) break}
         }catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){lastError=e}
     }
-    val seriesDoc=loaded ?: throw java.io.IOException("Could not load AnimeSalt series page"+(lastError?.message?.let{": $it"}?:""),lastError)
-    val seasonButtons=seriesDoc.select(".season-btn[data-season][data-post], [data-season][data-post], [data-season][data-id]")
+    val doc=seriesDoc ?: throw java.io.IOException("Could not load AnimeSalt series page"+(lastError?.message?.let{": $it"}?:""),lastError)
+    val seasonButtons=doc.select("[data-season][data-post], [data-season][data-id], .season-btn[data-season]")
         .mapNotNull { button ->
-            val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
-            val post=button.attr("data-post").ifBlank { button.attr("data-id") }.trim()
+            val n=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
+            val post=button.attr("data-post").ifBlank{button.attr("data-id")}.trim()
             if(post.isBlank()) return@mapNotNull null
-            Triple(number,post,button.text().replace(Regex("\\s+")," ").trim())
+            Triple(n,post,button.text().replace(Regex("\\s+")," ").trim())
         }.distinctBy{it.first}.sortedBy{it.first}
-
-    fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
-        if(targetSeason==1) return seriesDoc
-        val button=seasonButtons.firstOrNull{it.first==targetSeason} ?: return org.jsoup.Jsoup.parse("")
-        return try{
-            postHtml(
-                "$BASE_URL/wp-admin/admin-ajax.php",
-                mapOf("action" to "action_select_season","season" to button.first.toString(),"post" to button.second),
-                "$BASE_URL/"
-            )
-        }catch(_:Exception){
-            org.jsoup.Jsoup.parse("")
-        }
+    val seasonsInLinks=doc.select("a[href*=/episode/]").mapNotNull { link ->
+        val href=link.absUrl("href").ifBlank{link.attr("href")}
+        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
+        Regex("(?:^|[-/])(\\d+)x\\d+(?:$|[-/])",RegexOption.IGNORE_CASE).find(path)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
-
+    val seasons=(seasonButtons.map{it.first}+seasonsInLinks).distinct().sorted().ifEmpty{listOf(1)}
+    fun seasonEpisodes(target:Int):List<Episode>{
+        val fromInitial=parseEpisodeList(doc,slug,target).distinctBy{it.url}
+        if(fromInitial.isNotEmpty()) return fromInitial
+        val button=seasonButtons.firstOrNull{it.first==target} ?: return emptyList()
+        try{
+            val ajax=postHtml("$BASE_URL/wp-admin/admin-ajax.php",
+                mapOf("action" to "action_select_season","season" to target.toString(),"post" to button.second),
+                "$BASE_URL/")
+            val parsed=parseEpisodeList(ajax,slug,target).distinctBy{it.url}
+            if(parsed.isNotEmpty()) return parsed
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){lastError=e}
+        return emptyList()
+    }
     val all=mutableListOf<Episode>()
-    var nextGlobalNumber=1
-    val seasons=seasonButtons.map{it.first}.distinct().sorted().ifEmpty{listOf(1)}
+    var global=1
     for(s in seasons){
-        val local=parseEpisodeList(seasonDocument(s),slug,s,0).distinctBy{it.url}.sortedBy{it.number}
-        if(local.isEmpty()) continue
-        local.forEachIndexed{index,ep->all+=ep.copy(number=nextGlobalNumber+index)}
-        nextGlobalNumber+=local.size
+        seasonEpisodes(s).sortedBy{it.number}.forEach{ep->all+=ep.copy(number=global++)}
     }
-    if(all.isEmpty()){
-        val parsed=seriesDoc.select("a[href]").mapNotNull{link->
-            val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
-            if(!href.contains("/episode/",true)) return@mapNotNull null
-            val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
-            val match=Regex("/episode/[^/]*?(?:-|/)(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path) ?: return@mapNotNull null
-            val s=match.groupValues[1].toIntOrNull()?:return@mapNotNull null
-            val n=match.groupValues[2].toIntOrNull()?:return@mapNotNull null
-            val title=link.attr("title").ifBlank{link.text()}.replace(Regex("\\s+")," ").trim()
-            Episode(n,title.ifBlank{"Episode $n"},"",href,animeSlug=slug) to s
-        }.distinctBy{it.first.url}.sortedWith(compareBy<Pair<Episode,Int>>{it.second}.thenBy{it.first.number})
-        var global=1
-        for((ep,_) in parsed) all+=ep.copy(number=global++)
-    }
-    all.distinctBy{it.url}.sortedBy{it.number}
+    val unique=all.distinctBy{it.url}.sortedBy{it.number}
+    if(unique.isEmpty()) throw java.io.IOException("AnimeSalt page loaded, but no episode links were found. The site's episode markup may have changed.")
+    unique
 }
+
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
     val candidates=doc.select("a[href]").mapNotNull { link ->
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
