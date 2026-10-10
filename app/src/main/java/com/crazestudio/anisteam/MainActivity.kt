@@ -1045,9 +1045,51 @@ private class AnimeSaltChromeClient(
                     android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this,true)
                     webChromeClient=chromeClient
                     webViewClient=object:WebViewClient(){
+                        private fun handlePlayerUrl(view:android.webkit.WebView,target:Uri):Boolean{
+                            val scheme=target.scheme?.lowercase().orEmpty()
+                            if(scheme=="http" || scheme=="https") return false
+
+                            // Embedded players sometimes use intent:// links to hand playback
+                            // to another app. Parse and launch defensively so a missing handler
+                            // or malformed intent never crashes AniSteam.
+                            if(scheme=="intent"){
+                                var fallback:String?=null
+                                try{
+                                    val intent=Intent.parseUri(target.toString(),Intent.URI_INTENT_SCHEME)
+                                    fallback=intent.getStringExtra("browser_fallback_url")
+                                    try{
+                                        view.context.startActivity(intent)
+                                        return true
+                                    }catch(_:android.content.ActivityNotFoundException){
+                                        // Continue to the player-provided web fallback below.
+                                    }catch(_:SecurityException){
+                                        // A blocked external target should not close AniSteam.
+                                    }
+                                }catch(_:Exception){
+                                    // Ignore malformed intent URLs and keep the current player open.
+                                }
+                                if(!fallback.isNullOrBlank()){
+                                    val fallbackUri=try{Uri.parse(fallback)}catch(_:Exception){null}
+                                    if(fallbackUri?.scheme=="http" || fallbackUri?.scheme=="https"){
+                                        view.loadUrl(fallback!!)
+                                    }
+                                }
+                                return true
+                            }
+
+                            // Do not let unknown custom schemes navigate the WebView or terminate
+                            // the player. Only explicit HTTP(S) pages stay inside AniSteam.
+                            return true
+                        }
+
                         override fun shouldOverrideUrlLoading(view:android.webkit.WebView,request:android.webkit.WebResourceRequest):Boolean{
-                            val target=request.url
-                            return !(target.scheme.equals("https",true)||target.scheme.equals("http",true))
+                            return handlePlayerUrl(view,request.url)
+                        }
+
+                        @Suppress("DEPRECATION")
+                        override fun shouldOverrideUrlLoading(view:android.webkit.WebView,url:String):Boolean{
+                            val target=try{Uri.parse(url)}catch(_:Exception){return true}
+                            return handlePlayerUrl(view,target)
                         }
                     }
                     tag=server.url
