@@ -612,48 +612,47 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     val normalized=q.trim().replace(Regex("\\s+")," ")
     val queries=buildList {
         add(normalized)
-        normalized.split(" ").filter { it.length >= 3 }
-            .sortedByDescending { it.length }
-            .forEach { term -> if(none { it.equals(term,ignoreCase=true) }) add(term) }
+        normalized.split(" ").filter{it.length>=3}.sortedByDescending{it.length}
+            .forEach{term->if(none{it.equals(term,ignoreCase=true)}) add(term)}
     }
     val results=mutableListOf<Anime>()
     val failures=mutableListOf<Exception>()
     for(term in queries){
         val encoded=URLEncoder.encode(term,"UTF-8")
         val termResults=mutableListOf<Anime>()
-        for(page in 1..12){
-            val urls=if(page==1) listOf("$BASE_URL/?s=$encoded")
-                else listOf("$BASE_URL/page/$page/?s=$encoded","$BASE_URL/?s=$encoded&paged=$page")
+        for(page in 1..20){
+            val urls=if(page==1) listOf("$BASE_URL/?s=$encoded","$BASE_URL/series/?s=$encoded","$BASE_URL/movies/?s=$encoded")
+                else listOf("$BASE_URL/page/$page/?s=$encoded","$BASE_URL/series/page/$page/?s=$encoded","$BASE_URL/movies/page/$page/?s=$encoded")
             var pageResults=emptyList<Anime>()
             for(url in urls){
-                try{
-                    pageResults=extractSeries(getHtml(url))
-                    if(pageResults.isNotEmpty()) break
-                }catch(e:kotlinx.coroutines.CancellationException){ throw e }
-                catch(e:Exception){ failures += e }
+                try{val found=extractSeries(getHtml(url));if(found.isNotEmpty()){pageResults=found;break}}
+                catch(e:kotlinx.coroutines.CancellationException){throw e}
+                catch(e:Exception){failures+=e}
             }
             if(pageResults.isEmpty()) break
-            termResults += pageResults
+            termResults+=pageResults
         }
-        results += termResults
+        results+=termResults
         if(termResults.isNotEmpty()) break
     }
     val unique=results.distinctBy{it.kind+":"+it.slug}
-    if(unique.isEmpty() && failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?: "network error"),failures.first())
+    if(unique.isEmpty() && failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?:"network error"),failures.first())
     unique
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
     val results=mutableListOf<Anime>()
-    val paths=listOf("/","/tv/","/movies/")
+    val paths=listOf("/", "/series/", "/movies/", "/tv/")
     for(path in paths){
-        for(page in 1..8){
+        for(page in 1..30){
             val url=when {
                 page==1 -> "$BASE_URL$path"
                 path=="/" -> "$BASE_URL/page/$page/"
-                else -> "$BASE_URL"+path+"page/$page/"
+                else -> "$BASE_URL"+path.trimEnd('/')+"/page/$page/"
             }
-            val pageResults=try{extractSeries(getHtml(url))}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(_:Exception){emptyList()}
+            val pageResults=try{extractSeries(getHtml(url))}
+                catch(e:kotlinx.coroutines.CancellationException){throw e}
+                catch(_:Exception){emptyList()}
             if(pageResults.isEmpty()) break
             results += pageResults
         }
