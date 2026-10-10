@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,8 +24,20 @@ jobs:
           gradle-version: '9.5.1'
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
+      - name: Remove older APK artifacts to free storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" --paginate --jq '.artifacts[] | select((.name | ascii_downcase | contains("apk")) or .name == "AniSteam-debug") | .id' |
+          while read -r artifact_id; do
+            [ -z "$artifact_id" ] && continue
+            echo "Deleting old APK artifact $artifact_id"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/$artifact_id" || true
+          done
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AniSteam-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 1
