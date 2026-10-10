@@ -1028,15 +1028,17 @@ private class AnimeSaltChromeClient(
                 val script="""(function(){
                     try {
                       var p=(typeof jwplayer==='function')?jwplayer():null;
-                      if(!p || !p.getState) return JSON.stringify({ready:false,p:0,d:0,s:'loading'});
-                      var state=p.getState()||'';
+                      var video=document.querySelector('video');
+                      var ready=false, position=0, duration=0, state='loading';
+                      if(p && p.getState){ready=true;state=p.getState()||'';position=p.getPosition()||0;duration=p.getDuration()||0;}
+                      else if(video){ready=video.readyState>=1;position=video.currentTime||0;duration=Number.isFinite(video.duration)?video.duration:0;state=video.paused?'paused':'playing';}
                       var root=document.head||document.documentElement;
                       if(root && !document.getElementById('anisteam-player-style')){
                         var st=document.createElement('style');st.id='anisteam-player-style';
                         st.textContent='.jw-controlbar,.jw-display,.jw-title,.jw-rightclick{display:none!important}.jw-preview{background-size:contain!important}';
                         root.appendChild(st);
                       }
-                      return JSON.stringify({ready:true,p:p.getPosition()||0,d:p.getDuration()||0,s:state});
+                      return JSON.stringify({ready:ready,p:position,d:duration,s:state});
                     } catch(e) { return JSON.stringify({ready:false,p:0,d:0,s:'loading'}); }
                 })()"""
                 current.evaluateJavascript(script){raw->
