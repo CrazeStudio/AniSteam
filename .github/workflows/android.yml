@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
@@ -33,9 +33,15 @@ jobs:
             [ -z "$artifact_id" ] && continue
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" || true
           done
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: AniSteam-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 1
+      # Release assets do not consume GitHub Actions artifact storage quota.
+      - name: Publish latest APK release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release delete anisteam-debug --yes --cleanup-tag || true
+          gh release create anisteam-debug app/build/outputs/apk/debug/app-debug.apk \
+            --title "AniSteam Latest Debug APK" \
+            --notes "Latest successful AniSteam debug build from commit ${GITHUB_SHA}." \
+            --target "${GITHUB_SHA}"
