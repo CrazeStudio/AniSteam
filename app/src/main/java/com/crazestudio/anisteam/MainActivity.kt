@@ -1120,8 +1120,14 @@ private class AnimeSaltChromeClient(
                     Box(Modifier.size(52.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold)}
                 }
                 Surface(onClick={
-                    if(isPlaying)runPlayerJs("try{jwplayer().pause()}catch(e){}")
-                    else runPlayerJs("try{if(typeof jwplayer==='function' && jwplayer().getState && jwplayer().getState()!=='idle'){jwplayer().play()}else if(typeof vload==='function'){vload()}else if(typeof jwplayer==='function'){jwplayer().play()}}catch(e){try{vload()}catch(x){}}")
+                    val command=if(isPlaying) "pause" else "play"
+                    runPlayerJs("""(function(){try{
+                      if(typeof jwplayer==='function'){try{var p=jwplayer();if(p&&p.getState){if('$command'==='pause')p.pause();else p.play();return;}}catch(e){}}
+                      if(typeof vload==='function' && '$command'==='play'){try{vload()}catch(e){}}
+                      var videos=Array.from(document.querySelectorAll('video'));
+                      videos.forEach(function(v){try{if('$command'==='pause')v.pause();else{var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;v.play().catch(function(){});});}}catch(e){}});
+                      if('$command'==='play' && videos.length===0){var b=Array.from(document.querySelectorAll('button,[role=button]')).find(function(x){return /play/i.test((x.getAttribute('aria-label')||'')+' '+(x.title||'')+' '+(x.innerText||''))});if(b)b.click();}
+                    }catch(e){}})()""")
                     controlsVisible=true
                 },shape=RoundedCornerShape(50),color=Color(0xFFFF7A18)){
                     Box(Modifier.size(70.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=24.sp,fontWeight=FontWeight.Bold)}
