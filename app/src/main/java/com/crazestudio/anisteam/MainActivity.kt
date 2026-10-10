@@ -641,23 +641,20 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
+    // Only load the first page of each catalogue section for the home screen.
+    // Search and the explicit catalogue pager handle deeper results on demand.
+    val paths=listOf("/", "/tv/", "/movies/")
     val results=mutableListOf<Anime>()
-    val paths=listOf("/", "/series/", "/movies/", "/tv/")
     for(path in paths){
-        for(page in 1..30){
-            val url=when {
-                page==1 -> "$BASE_URL$path"
-                path=="/" -> "$BASE_URL/page/$page/"
-                else -> "$BASE_URL"+path.trimEnd('/')+"/page/$page/"
-            }
-            val pageResults=try{extractSeries(getHtml(url))}
-                catch(e:kotlinx.coroutines.CancellationException){throw e}
-                catch(_:Exception){emptyList()}
-            if(pageResults.isEmpty()) break
-            results += pageResults
+        try{
+            results += extractSeries(getHtml("$BASE_URL$path"))
+        }catch(e:kotlinx.coroutines.CancellationException){
+            throw e
+        }catch(_:Exception){
+            // One unavailable section must not blank the whole home screen.
         }
     }
-    results.distinctBy{it.kind+":"+it.slug}
+    results.distinctBy{it.kind+":"+it.slug}.take(60)
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
@@ -755,17 +752,15 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
         if(targetSeason==1) return seriesDoc
         val button=seasonButtons.firstOrNull{it.first==targetSeason} ?: return org.jsoup.Jsoup.parse("")
-        val urls=listOf(
-            "$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=${button.first}&post=${button.second}",
-            "$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=${button.first}&post_id=${button.second}"
-        )
-        for(url in urls){
-            try{
-                val doc=getHtml(url)
-                if(doc.select("a[href*=/episode/]").isNotEmpty()) return doc
-            }catch(_:Exception){}
+        return try{
+            postHtml(
+                "$BASE_URL/wp-admin/admin-ajax.php",
+                mapOf("action" to "action_select_season","season" to button.first.toString(),"post" to button.second),
+                "$BASE_URL/"
+            )
+        }catch(_:Exception){
+            org.jsoup.Jsoup.parse("")
         }
-        return org.jsoup.Jsoup.parse("")
     }
 
     val all=mutableListOf<Episode>()
@@ -1003,6 +998,26 @@ private val sourceHttpClient by lazy {
         .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
         .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
         .build()
+}
+
+private fun postHtml(url:String,fields:Map<String,String>,referer:String):org.jsoup.nodes.Document{
+    val form=okhttp3.FormBody.Builder().apply{fields.forEach{(key,value)->add(key,value)}}.build()
+    val request=okhttp3.Request.Builder()
+        .url(url)
+        .post(form)
+        .header("User-Agent","Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36")
+        .header("Accept","text/html, */*; q=0.01")
+        .header("X-Requested-With","XMLHttpRequest")
+        .header("Origin",BASE_URL)
+        .header("Referer",referer)
+        .build()
+    val response=sourceHttpClient.newCall(request).execute()
+    response.use{
+        if(!it.isSuccessful) throw java.io.IOException("AnimeSalt season request HTTP ${it.code}")
+        val body=it.body.string()
+        if(body.isBlank()) throw java.io.IOException("AnimeSalt returned an empty season")
+        return org.jsoup.Jsoup.parse(body,url)
+    }
 }
 
 private fun getHtml(url:String):org.jsoup.nodes.Document{
