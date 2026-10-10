@@ -67,7 +67,7 @@ private const val SOURCE = "https://animesalt.cx"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
-data class PlayerServer(val name:String,val url:String)
+data class PlayerServer(val name:String,val url:String,val referer:String="")
 data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
 
 class MainActivity: ComponentActivity() {
@@ -1180,7 +1180,15 @@ private class AnimeSaltChromeClient(
     val serverPath=Uri.parse(server.url).path.orEmpty()
     val directMedia=listOf(".m3u8",".mp4",".mpd",".webm",".m4v").any{serverPath.endsWith(it,ignoreCase=true)}
     if(!directMedia){
-        SourceWebPlayer(episode,server,onBack,onEpisode)
+        Box(Modifier.fillMaxSize().background(Color.Black).padding(28.dp),contentAlignment=Alignment.Center){
+            Column(horizontalAlignment=Alignment.CenterHorizontally){
+                Text("No direct video stream found",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("AniSteam's native player needs an MP4, HLS, or DASH stream URL. This server only returned a webpage, so it cannot be played as a video.",color=Color(0xFFB7B7C2),fontSize=12.sp)
+                Spacer(Modifier.height(14.dp))
+                Button(onClick=onBack,colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("BACK TO EPISODES")}
+            }
+        }
         return
     }
     var fullscreen by remember(server.url){mutableStateOf(false)}
@@ -1191,7 +1199,16 @@ private class AnimeSaltChromeClient(
     var positionMs by remember(server.url){mutableLongStateOf(0L)}
     var durationMs by remember(server.url){mutableLongStateOf(0L)}
     var scrubbing by remember(server.url){mutableStateOf(false)}
-    val exoPlayer=remember(server.url){androidx.media3.exoplayer.ExoPlayer.Builder(context).build()}
+    val exoPlayer=remember(server.url,server.referer){
+        val httpFactory=androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36")
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(mapOf("Referer" to server.referer.ifBlank{episode.url},"Origin" to (try{Uri.parse(server.referer.ifBlank{episode.url}).let{"${it.scheme}://${it.host}"}}catch(_:Exception){SOURCE})))
+        val dataSourceFactory=androidx.media3.datasource.DefaultDataSource.Factory(context,httpFactory)
+        androidx.media3.exoplayer.ExoPlayer.Builder(context)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+    }
     LaunchedEffect(exoPlayer,server.url){
         val uri=Uri.parse(server.url)
         val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
@@ -1317,63 +1334,112 @@ private fun formatPlayerTime(milliseconds:Long):String{
 }
 
 private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
-    val episodePage=getHtml(episodeUrl)
-    val pageUrls=linkedMapOf<String,String>()
-    val media=linkedMapOf<String,String>()
+    val media=linkedMapOf<String,PlayerServer>()
+    val visited=linkedSetOf<String>()
+    val pending=ArrayDeque<Triple<String,String,Int>>()
+    pending.add(Triple(episodeUrl,"AnimeSalt",0))
+
     fun normalize(raw:String,base:String):String{
-        val cleaned=raw.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().removeSurrounding("\"").removeSurrounding("'")
-        return try{URL(base).let{URL(it,cleaned).toString()}}catch(_:Exception){cleaned}
+        val cleaned=raw
+            .replace("\\u0026","&").replace("\\u003d","=").replace("\\u002f","/")
+            .replace("\\/","/").replace("&amp;","&")
+            .replace("\\\\u0026","&").replace("\\\\u003d","=").trim()
+            .trim('"','\'')
+        return try{URL(URL(base),cleaned).toString()}catch(_:Exception){cleaned}
     }
     fun isMedia(raw:String):Boolean{
         val path=try{Uri.parse(raw).path.orEmpty()}catch(_:Exception){raw.substringBefore('?')}
-        return listOf(".m3u8",".mp4",".mpd",".webm",".m4v").any{path.endsWith(it,ignoreCase=true)}
+        val full=raw.lowercase()
+        return listOf(".m3u8",".mp4",".mpd",".webm",".m4v",".mov").any{path.endsWith(it,ignoreCase=true)} ||
+            Regex("""[?&](?:type|format)=?(?:hls|mp4|dash)""",RegexOption.IGNORE_CASE).containsMatchIn(full)
     }
-    fun inspectDocument(doc:org.jsoup.nodes.Document,base:String,serverName:String){
-        doc.select("video[src],video source[src],source[src],video[data-src]").forEach{node->
-            val raw=node.attr("src").ifBlank{node.attr("data-src")}
-            if(raw.isNotBlank()){val target=normalize(raw,base);if(isMedia(target))media.putIfAbsent(target,serverName)}
+    fun addCandidate(raw:String,base:String,name:String,referer:String){
+        if(raw.isBlank())return
+        val target=normalize(raw,base)
+        if(target.startsWith("http",true) && isMedia(target)){
+            media.putIfAbsent(target,PlayerServer(name,target,referer))
         }
-        val scripts=doc.select("script").joinToString("\n"){it.data().ifBlank{it.html()}}
-        val quoted=Regex("""(?i)["'](?:file|src|source|url)["']\s*:\s*["']([^"']+)["']""")
-        quoted.findAll(scripts).forEach{match->
-            val target=normalize(match.groupValues[1],base)
-            if(isMedia(target))media.putIfAbsent(target,serverName)
-        }
-        val urls=Regex("""(?i)(?:https?:\\?/\\?/|//)[^"'\s<>]+?\.(?:m3u8|mp4|mpd|webm|m4v)(?:\?[^"'\s<>]*)?""")
-        urls.findAll(scripts).forEach{match->
-            val target=normalize(match.value,base)
-            if(isMedia(target))media.putIfAbsent(target,serverName)
-        }
-        doc.select("iframe[src],iframe[data-src]").forEach{iframe->
-            val raw=iframe.attr("data-src").ifBlank{iframe.attr("src")}
-            if(raw.isBlank())return@forEach
-            val target=normalize(raw,base)
-            if(target.startsWith("http",true))pageUrls.putIfAbsent(target,serverName)
-            val encoded=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null}
-            if(!encoded.isNullOrBlank()){
-                try{
-                    val entries=JSONArray(Base64.decode(encoded,Base64.DEFAULT).toString(Charsets.UTF_8))
-                    for(i in 0 until entries.length()){
-                        val item=entries.optJSONObject(i)?:continue
-                        val link=item.optString("link").trim()
-                        if(link.isNotBlank())pageUrls.putIfAbsent(normalize(link,base),item.optString("language").ifBlank{"Server "+(i+1)})
-                    }
-                }catch(_:Exception){}
+    }
+    fun decodeServerData(target:String,base:String,name:String){
+        val encoded=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null} ?: return
+        if(encoded.isBlank())return
+        val decoded=try{
+            val normalized=encoded.replace(' ','+')
+            Base64.decode(normalized,Base64.DEFAULT).toString(Charsets.UTF_8)
+        }catch(_:Exception){return}
+        try{
+            val array=JSONArray(decoded)
+            for(i in 0 until array.length()){
+                val item=array.optJSONObject(i) ?: continue
+                val link=item.optString("link").ifBlank{item.optString("url")}
+                if(link.isNotBlank()){
+                    val serverName=item.optString("language").ifBlank{item.optString("name").ifBlank{"Server \${i+1}"}}
+                    pending.add(Triple(normalize(link,base),serverName,1))
+                }
             }
+        }catch(_:Exception){
+            try{
+                val obj=JSONObject(decoded)
+                listOf("file","src","source","url","link","hls","m3u8").forEach{key->
+                    val value=obj.optString(key)
+                    if(value.isNotBlank())addCandidate(value,base,name,target)
+                }
+            }catch(_:Exception){}
         }
     }
-    inspectDocument(episodePage,episodeUrl,"AnimeSalt")
-    for((pageUrl,name) in pageUrls.entries.take(8)){
-        if(media.isNotEmpty())break
-        try{inspectDocument(getHtml(pageUrl),pageUrl,name)}
-        catch(e:kotlinx.coroutines.CancellationException){throw e}
+
+    while(pending.isNotEmpty() && visited.size<18 && media.size<12){
+        val (pageUrl,serverName,depth)=pending.removeFirst()
+        if(!pageUrl.startsWith("http",true) || !visited.add(pageUrl))continue
+        try{
+            val doc=getHtml(pageUrl)
+            val base=doc.location().ifBlank{pageUrl}
+            doc.select("video[src],video[data-src],video[data-hls],source[src],source[data-src],source[data-hls],source[data-file],[data-video],[data-hls],[data-m3u8]").forEach{node->
+                listOf("src","data-src","data-hls","data-file","data-video","data-m3u8").forEach{attr->
+                    val raw=node.attr(attr)
+                    if(raw.isNotBlank())addCandidate(raw,base,serverName,base)
+                }
+            }
+
+            val scripts=doc.select("script").joinToString("\n"){it.data().ifBlank{it.html()}}
+            val expanded=scripts.replace("\\/","/").replace("\\u0026","&").replace("\\u003d","=")
+                .replace("\\u002f","/").replace("&amp;","&")
+            val keyValue=Regex("""(?is)["'](?:file|src|source|url|hls|m3u8|contentUrl)["']\s*:\s*["']([^"']+)["']""")
+            keyValue.findAll(expanded).forEach{match->addCandidate(match.groupValues[1],base,serverName,base)}
+            val rawUrls=Regex("""(?i)(?:https?:)?//[^"'\s<>\\]+?\.(?:m3u8|mp4|mpd|webm|m4v|mov)(?:\?[^"'\s<>\\]*)?""")
+            rawUrls.findAll(expanded).forEach{match->addCandidate(match.value,base,serverName,base)}
+
+            Regex("""(?i)["'](?:data|source|sources|file|url)["']\s*[:=]\s*["']([A-Za-z0-9_+/=-]{24,})["']""")
+                .findAll(expanded).take(12).forEach{match->
+                    val decoded=try{Base64.decode(match.groupValues[1],Base64.DEFAULT).toString(Charsets.UTF_8)}catch(_:Exception){""}
+                    if(decoded.startsWith("http",true))addCandidate(decoded,base,serverName,base)
+                    else {
+                        Regex("""https?://[^"'\s<>]+?\.(?:m3u8|mp4|mpd|webm|m4v)(?:\?[^"'\s<>]*)?""",RegexOption.IGNORE_CASE)
+                            .findAll(decoded).forEach{addCandidate(it.value,base,serverName,base)}
+                    }
+                }
+
+            if(depth<2){
+                doc.select("iframe[src],iframe[data-src],iframe[data-lazy-src],a[href*=/embed/],a[href*=/player/]").forEach{node->
+                    val raw=node.attr("data-src").ifBlank{node.attr("data-lazy-src")}.ifBlank{node.attr("src")}.ifBlank{node.attr("href")}
+                    if(raw.isBlank())return@forEach
+                    val target=normalize(raw,base)
+                    if(target.startsWith("http",true)){
+                        decodeServerData(target,base,serverName)
+                        if(!visited.contains(target))pending.add(Triple(target,serverName,depth+1))
+                    }
+                }
+                val sourceObjects=Regex("""(?is)["'](?:sources|tracks)["']\s*:\s*(\[[^\]]{1,12000}\])""")
+                sourceObjects.findAll(expanded).take(8).forEach{match->
+                    Regex("""(?is)["'](?:file|src|url)["']\s*:\s*["']([^"']+)["']""")
+                        .findAll(match.groupValues[1]).forEach{addCandidate(it.groupValues[1],base,serverName,base)}
+                }
+            }
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(_:Exception){}
     }
-    if(media.isNotEmpty()) return media.map{(url,name)->PlayerServer(name,url)}
-    // Embedded-only sources must remain playable through their own HTML player.
-    return pageUrls.map{(url,name)->PlayerServer(name,url)}.distinctBy{it.url}
+    return media.values.toList()
 }
-
 private val sourceHttpClient by lazy {
     okhttp3.OkHttpClient.Builder()
         .followRedirects(true)
