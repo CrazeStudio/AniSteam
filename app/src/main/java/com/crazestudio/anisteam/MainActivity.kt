@@ -992,10 +992,7 @@ private class AnimeSaltChromeClient(
 }
 
 @Composable private fun SourcePlayer(
-    episode:Episode,
-    episodes:List<Episode>,
-    onBack:()->Unit,
-    onEpisode:(Episode)->Unit
+    episode:Episode, episodes:List<Episode>, onBack:()->Unit, onEpisode:(Episode)->Unit
 ){
     val context=LocalContext.current
     val activity=context as ComponentActivity
@@ -1018,11 +1015,9 @@ private class AnimeSaltChromeClient(
     LaunchedEffect(exoPlayer,server.url){
         val uri=Uri.parse(server.url)
         val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
-            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true)) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true))setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
         }.build()
-        exoPlayer.setMediaItem(item)
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady=true
+        exoPlayer.setMediaItem(item);exoPlayer.prepare();exoPlayer.playWhenReady=true
     }
     DisposableEffect(exoPlayer){
         val listener=object:androidx.media3.common.Player.Listener{
@@ -1044,9 +1039,7 @@ private class AnimeSaltChromeClient(
             kotlinx.coroutines.delay(350)
         }
     }
-    LaunchedEffect(controlsVisible,isPlaying){
-        if(controlsVisible && isPlaying){kotlinx.coroutines.delay(4500);controlsVisible=false}
-    }
+    LaunchedEffect(controlsVisible,isPlaying){if(controlsVisible && isPlaying){kotlinx.coroutines.delay(4500);controlsVisible=false}}
     LaunchedEffect(fullscreen){
         activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if(fullscreen){
@@ -1056,11 +1049,11 @@ private class AnimeSaltChromeClient(
                 activity.window.insetsController?.systemBarsBehavior=android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }else{
                 @Suppress("DEPRECATION")
-                activity.window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+                activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             }
         }else{
             activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R)activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
             else{
                 @Suppress("DEPRECATION")
                 activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
@@ -1071,35 +1064,32 @@ private class AnimeSaltChromeClient(
         onDispose{
             activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R)activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
             else{
                 @Suppress("DEPRECATION")
                 activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
             }
         }
     }
-    BackHandler{if(fullscreen) fullscreen=false else onBack()}
+    BackHandler{if(fullscreen)fullscreen=false else onBack()}
     Box(Modifier.fillMaxSize().background(Color.Black).clickable{controlsVisible=!controlsVisible}){
         AndroidView(
-            factory={ctx->
-                androidx.media3.ui.PlayerView(ctx).apply{
-                    useController=false
-                    this.player=exoPlayer
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                    setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
-                    resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                }
-            },
+            factory={ctx->androidx.media3.ui.PlayerView(ctx).apply{
+                useController=false
+                this.player=exoPlayer
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
+                resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }},
             update={view->if(view.player!==exoPlayer)view.player=exoPlayer},
             modifier=Modifier.fillMaxSize()
         )
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000),Color.Transparent,Color(0xCC000000)))))
-        if(buffering && playbackError==null) CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
+        if(buffering && playbackError==null)CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
         if(playbackError!=null){
             Column(Modifier.align(Alignment.Center).padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
                 Text("Can't play this source",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
+                Spacer(Modifier.height(8.dp));Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick={playbackError=null;exoPlayer.prepare();exoPlayer.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("RETRY",fontWeight=FontWeight.Bold)}
             }
@@ -1110,7 +1100,7 @@ private class AnimeSaltChromeClient(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)){
                     Text("ANISTEAM PLAYER",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
-                    Text(episode.title.ifBlank{"Episode " + episode.number},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                    Text(episode.title.ifBlank{"Episode "+episode.number},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
                 }
                 Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}}
             }
@@ -1118,25 +1108,22 @@ private class AnimeSaltChromeClient(
         AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(160)),exit=fadeOut(tween(200)),modifier=Modifier.align(Alignment.Center)){
             Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
                 Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
-                Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause() else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
+                Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause()else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
                 Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
             }
         }
         AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.BottomCenter)){
             Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=16.dp)){
-                Slider(
-                    value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f) else 0f,
+                Slider(value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f)else 0f,
                     onValueChange={fraction->scrubbing=true;positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)},
                     onValueChangeFinished={exoPlayer.seekTo(positionMs);scrubbing=false},
                     colors=SliderDefaults.colors(thumbColor=colors.primary,activeTrackColor=colors.primary,inactiveTrackColor=Color(0x66777780)),
-                    modifier=Modifier.fillMaxWidth().height(28.dp)
-                )
+                    modifier=Modifier.fillMaxWidth().height(28.dp))
                 Row(verticalAlignment=Alignment.CenterVertically){
                     Text(formatPlayerTime(positionMs),color=Color.White,fontSize=11.sp,fontWeight=FontWeight.SemiBold)
                     Text(" / ",color=Color(0xFF888892),fontSize=11.sp)
                     Text(formatPlayerTime(durationMs),color=Color(0xFFB6B6C0),fontSize=11.sp)
-                    Spacer(Modifier.weight(1f))
-                    Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                    Spacer(Modifier.weight(1f));Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
                 }
             }
         }
@@ -1145,10 +1132,8 @@ private class AnimeSaltChromeClient(
 
 private fun formatPlayerTime(milliseconds:Long):String{
     val seconds=(milliseconds.coerceAtLeast(0L)/1000L).toInt()
-    val hours=seconds/3600
-    val minutes=(seconds%3600)/60
-    val remainder=seconds%60
-    return if(hours>0) String.format("%d:%02d:%02d",hours,minutes,remainder) else String.format("%02d:%02d",minutes,remainder)
+    val hours=seconds/3600;val minutes=(seconds%3600)/60;val remainder=seconds%60
+    return if(hours>0)String.format("%d:%02d:%02d",hours,minutes,remainder)else String.format("%02d:%02d",minutes,remainder)
 }
 
 private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
@@ -1191,7 +1176,7 @@ private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
                     for(i in 0 until entries.length()){
                         val item=entries.optJSONObject(i)?:continue
                         val link=item.optString("link").trim()
-                        if(link.isNotBlank())pageUrls.putIfAbsent(normalize(link,base),item.optString("language").ifBlank{"Server " + (i+1)})
+                        if(link.isNotBlank())pageUrls.putIfAbsent(normalize(link,base),item.optString("language").ifBlank{"Server "+(i+1)})
                     }
                 }catch(_:Exception){}
             }
