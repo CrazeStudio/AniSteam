@@ -611,43 +611,47 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
 
     val normalized=q.trim().replace(Regex("\\s+")," ")
-    val queries=buildList {
-        add(normalized)
-        normalized.split(" ").filter { it.length >= 3 }
-            .sortedByDescending { it.length }
-            .forEach { term -> if(none { it.equals(term,ignoreCase=true) }) add(term) }
-    }
+    val terms=linkedSetOf(normalized)
+    normalized.split(" ").filter{it.length>=3}.sortedByDescending{it.length}.forEach{terms.add(it)}
 
     val results=mutableListOf<Anime>()
     val failures=mutableListOf<Exception>()
-    for(term in queries){
+    for(term in terms){
         val encoded=URLEncoder.encode(term,"UTF-8")
-        val termResults=mutableListOf<Anime>()
-        val urls=listOf("$BASE_URL/?s=$encoded","$BASE_URL/tv/?s=$encoded","$BASE_URL/movies/?s=$encoded")
+        val urls=buildList {
+            add("$BASE_URL/?s=$encoded")
+            add("$BASE_URL/tv/?s=$encoded")
+            add("$BASE_URL/movies/?s=$encoded")
+            for(page in 2..8){
+                add("$BASE_URL/page/$page/?s=$encoded")
+                add("$BASE_URL/tv/page/$page/?s=$encoded")
+                add("$BASE_URL/movies/page/$page/?s=$encoded")
+            }
+        }
         for(url in urls){
             try{
-                termResults += extractSeries(getHtml(url))
-            }catch(e:kotlinx.coroutines.CancellationException){
-                throw e
-            }catch(e:Exception){
-                failures += e
-            }
-            if(termResults.distinctBy{it.kind+":"+it.slug}.isNotEmpty()) break
+                val found=extractSeries(getHtml(url))
+                results += found
+                if(results.distinctBy{it.kind+":"+it.slug}.size>=100) break
+            }catch(e:kotlinx.coroutines.CancellationException){ throw e }
+            catch(e:Exception){ failures += e }
         }
-        results += termResults
-        if(termResults.isNotEmpty()) break
+        if(results.isNotEmpty()) break
     }
-
     val unique=results.distinctBy{it.kind+":"+it.slug}.take(100)
-    if(unique.isEmpty() && failures.isNotEmpty()){
-        throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?: "network error"),failures.first())
-    }
+    if(unique.isEmpty() && failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?: "network error"),failures.first())
     unique
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
-    val doc=getHtml(BASE_URL)
-    extractSeries(doc).distinctBy{it.kind+":"+it.slug}.take(100)
+    val results=mutableListOf<Anime>()
+    val paths=listOf("$BASE_URL/","$BASE_URL/tv/","$BASE_URL/movies/")
+    for(path in paths){
+        try{ results += extractSeries(getHtml(path)) }
+        catch(e:kotlinx.coroutines.CancellationException){ throw e }
+        catch(_:Exception){}
+    }
+    results.distinctBy{it.kind+":"+it.slug}.take(100)
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
@@ -718,85 +722,67 @@ private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
     val normalized=slug.trim('/')
     val prefix=normalized.substringBefore('/')
-    val seriesUrl=if(prefix in listOf("tv","series")) "$BASE_URL/$normalized/" else "$BASE_URL/series/$normalized/"
+    val seriesUrl=if(prefix in listOf("tv","series")) "$BASE_URL/$normalized/" else "$BASE_URL/tv/$normalized/"
     val seriesDoc=getHtml(seriesUrl)
 
-    // AnimeSalt owns the season grouping. AniSteam follows every AnimeSalt
-    // season and keeps one continuous visible episode number.
+    // The current AnimeSalt /tv/ pages can expose all episodes directly.
+    // Prefer the actual episode links on the page before attempting legacy season AJAX.
+    val direct=parseEpisodeList(seriesDoc,slug,0,0)
+        .distinctBy{it.url}
+        .sortedBy{it.number}
+    if(direct.isNotEmpty()){
+        return@withContext direct.mapIndexed{index,ep->ep.copy(number=index+1)}
+    }
+
     val seasonButtons=seriesDoc.select(".season-btn[data-season][data-post]")
         .mapNotNull { button ->
             val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
             val post=button.attr("data-post").trim()
             if(post.isBlank()) return@mapNotNull null
             Triple(number,post,button.text().replace(Regex("\\s+")," ").trim())
-        }
-        .distinctBy { it.first }
-        .sortedBy { it.first }
+        }.distinctBy{it.first}.sortedBy{it.first}
 
-    fun seasonDocument(targetSeason:Int):org.jsoup.nodes.Document{
-        if(targetSeason==1) return seriesDoc
-        val button=seasonButtons.firstOrNull{it.first==targetSeason} ?: return org.jsoup.Jsoup.parse("")
-        return getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season="+button.first+"&post="+button.second)
+    if(seasonButtons.isEmpty()){
+        throw java.io.IOException("AnimeSalt page loaded, but no episode links were found. The episode HTML structure may have changed.")
     }
 
     val all=mutableListOf<Episode>()
     var nextGlobalNumber=1
-    val maxSeason=if(seasonButtons.isEmpty()) season else minOf(season,seasonButtons.maxOf{it.first})
-
-    for(s in 1..maxSeason){
-        val local=parseEpisodeList(seasonDocument(s),slug,s,0)
-            .distinctBy { it.url }
-            .sortedBy { it.number }
-        if(local.isEmpty()) continue
-
-        // AnimeSalt can reset the URL episode number at every season
-        // (S2E1, S3E1, ...). The URL stays untouched; only AniSteam's
-        // displayed number becomes continuous (1..N).
-        local.forEachIndexed { index, ep ->
-            all += ep.copy(number=nextGlobalNumber+index)
-        }
-        nextGlobalNumber += local.size
+    for((s,post,_) in seasonButtons){
+        val doc=if(s==1) seriesDoc else getHtml("$BASE_URL/wp-admin/admin-ajax.php?action=action_select_season&season=$s&post=$post")
+        val local=parseEpisodeList(doc,slug,s,0).distinctBy{it.url}.sortedBy{it.number}
+        local.forEachIndexed{index,ep->all+=ep.copy(number=nextGlobalNumber+index)}
+        nextGlobalNumber+=local.size
     }
-
-    all.distinctBy { it.url }.sortedBy { it.number }
+    all.distinctBy{it.url}.sortedBy{it.number}
 }
+
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
-    // AnimeSalt's season x episode URL is the source of truth.
-    // Keep the real URL intact while exposing a continuous episode number.
-    val candidates=doc.select("a[href*=/episode/]").mapNotNull { link ->
+    val candidates=doc.select("a[href]").mapNotNull { link ->
         val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
         if(href.isBlank()) return@mapNotNull null
-
         val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
-        val match=Regex("/episode/[^/]+-(\\d+)x(\\d+)/?",RegexOption.IGNORE_CASE).find(path)
+        if(!path.contains("/episode/",ignoreCase=true)) return@mapNotNull null
+        val tail=path.substringAfter("/episode/").trim('/')
+        if(tail.isBlank()) return@mapNotNull null
+
+        val seasonEpisode=Regex("(?:^|[-/])(\\d+)x(\\d+)(?:$|[-/])",RegexOption.IGNORE_CASE).find(tail)
+        val localNumber=seasonEpisode?.groupValues?.getOrNull(2)?.toIntOrNull()
+            ?: Regex("(?:episode|ep)[-_/]?(\\d+)",RegexOption.IGNORE_CASE).find(tail)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Regex("-(\\d+)$").find(tail)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: return@mapNotNull null
+        val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+        if(season>0 && seasonEpisode!=null && urlSeason!=season) return@mapNotNull null
 
-        val urlSeason=match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
-        val localNumber=match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
-        if(urlSeason!=season) return@mapNotNull null
-
-        val container=link.closest("li,article,.item,.episode,.episode-item")
-        val title=(
-            link.selectFirst(".entry-title,h2,h3,h4,.title")?.text()
-                ?: container?.selectFirst(".entry-title,h2,h3,h4,.title")?.text()
-                ?: link.attr("title")
-                ?: link.text()
-        ).replace(Regex("\\s+")," ").trim()
-
-        Episode(
-            number=localNumber+episodeOffset,
-            title=title.ifBlank{"Episode $localNumber"},
-            aired="",
-            url=href,
-            animeSlug=slug
-        )
+        val container=link.closest("li,article,.item,.episode,.episode-item,.ep-item,[class*=episode]")
+        val title=(link.selectFirst(".entry-title,h2,h3,h4,.title,.ep-title")?.text()
+            ?: container?.selectFirst(".entry-title,h2,h3,h4,.title,.ep-title")?.text()
+            ?: link.attr("title").ifBlank{link.text()}).replace(Regex("\\s+")," ").trim()
+        Episode(number=localNumber+episodeOffset,title=title.ifBlank{"Episode $localNumber"},aired="",url=href,animeSlug=slug)
     }
-
-    return candidates
-        .groupBy{it.url}
-        .mapNotNull{(_,items)->items.firstOrNull()}
-        .sortedBy{it.number}
+    return candidates.groupBy{it.url}.mapNotNull{(_,items)->items.firstOrNull()}.sortedBy{it.number}
 }
+
 private class AnimeSaltChromeClient(
     private val activity: ComponentActivity,
     private val onFullscreenChanged: (Boolean) -> Unit
