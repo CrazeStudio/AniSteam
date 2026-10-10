@@ -475,12 +475,15 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         try{
             val servers=withContext(Dispatchers.IO){fetchEmbeddedPlayer(ep.url)}
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if(servers.isEmpty()) playerError="No public player was found for this episode."
-            else{
-                val ready=ep.copy(servers=servers)
-                playingEpisode=ready
-                saveContinueWatching(context,ready)
-            }
+            // Some episode pages render their player client-side or hide the iframe
+            // until the page is opened in a real WebView. If extraction finds no iframe,
+            // open the episode page itself instead of stopping at a scraper error.
+            val availableServers=if(servers.isEmpty()){
+                listOf(PlayerServer("Episode page",ep.url,ep.url))
+            }else servers
+            val ready=ep.copy(servers=availableServers)
+            playingEpisode=ready
+            saveContinueWatching(context,ready)
         }catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){playerError="Could not load this episode player: "+(e.message?:"network error")}
         finally{playerLoading=false}
