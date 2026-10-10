@@ -113,19 +113,45 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     var data by remember{mutableStateOf<List<Anime>>(emptyList())}
     val continueWatching=remember{loadContinueWatchingList(context)}
     var loading by remember{mutableStateOf(true)}
+    var loadingMore by remember{mutableStateOf(false)}
+    var catalogPage by remember{mutableIntStateOf(1)}
+    var hasMore by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
 
     LaunchedEffect(submitted){
+        catalogPage=1
         loading=true
+        loadingMore=false
+        hasMore=true
         error=null
         try{
-            data=fetchAnime(submitted)
+            data=fetchAnime(submitted,1)
+            hasMore=data.isNotEmpty()
         }catch(e:kotlinx.coroutines.CancellationException){
             throw e
         }catch(e:Exception){
             error=e.message?:"Unable to load anime."
         }finally{
             loading=false
+        }
+    }
+
+    LaunchedEffect(submitted,catalogPage){
+        if(catalogPage<=1) return@LaunchedEffect
+        loadingMore=true
+        error=null
+        try{
+            val next=fetchAnime(submitted,catalogPage)
+            val previous=data
+            data=(previous+next).distinctBy{it.kind+":"+it.slug}
+            hasMore=data.size>previous.size && next.isNotEmpty()
+        }catch(e:kotlinx.coroutines.CancellationException){
+            throw e
+        }catch(e:Exception){
+            error=e.message?:"Unable to load more anime."
+            catalogPage=(catalogPage-1).coerceAtLeast(1)
+        }finally{
+            loadingMore=false
         }
     }
 
@@ -314,8 +340,18 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                 }
             }
             else->{
-                items(data, key={it.slug}){anime->
+                items(data, key={it.kind+":"+it.slug}){anime->
                     AnimeListCard(anime){onOpen(anime.slug)}
+                }
+                if(hasMore){
+                    item{
+                        Box(Modifier.fillMaxWidth().padding(20.dp),contentAlignment=Alignment.Center){
+                            if(loadingMore) CircularProgressIndicator(color=colors.primary,strokeWidth=2.dp)
+                            else Button(onClick={catalogPage+=1},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){
+                                Text("LOAD MORE ANIME",color=Color.White,fontWeight=FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -607,54 +643,49 @@ private const val BASE_URL = "https://animesalt.cx"
     }}},confirmButton={TextButton(onClick=onDismiss){Text("Done")}})
 }
 
-private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
-    if(q.isBlank()) return@withContext fetchHome()
+private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
+    if(q.isBlank()) return@withContext fetchHome(page)
     val normalized=q.trim().replace(Regex("\\s+")," ")
     val queries=buildList {
         add(normalized)
         normalized.split(" ").filter{it.length>=3}.sortedByDescending{it.length}
             .forEach{term->if(none{it.equals(term,ignoreCase=true)}) add(term)}
     }
-    val results=mutableListOf<Anime>()
     val failures=mutableListOf<Exception>()
     for(term in queries){
         val encoded=URLEncoder.encode(term,"UTF-8")
+        val urls=listOf(
+            if(page==1) "$BASE_URL/?s=$encoded" else "$BASE_URL/page/$page/?s=$encoded",
+            if(page==1) "$BASE_URL/tv/?s=$encoded" else "$BASE_URL/tv/page/$page/?s=$encoded",
+            if(page==1) "$BASE_URL/movies/?s=$encoded" else "$BASE_URL/movies/page/$page/?s=$encoded"
+        )
         val termResults=mutableListOf<Anime>()
-        for(page in 1..20){
-            val urls=if(page==1) listOf("$BASE_URL/?s=$encoded","$BASE_URL/series/?s=$encoded","$BASE_URL/movies/?s=$encoded")
-                else listOf("$BASE_URL/page/$page/?s=$encoded","$BASE_URL/series/page/$page/?s=$encoded","$BASE_URL/movies/page/$page/?s=$encoded")
-            var pageResults=emptyList<Anime>()
-            for(url in urls){
-                try{val found=extractSeries(getHtml(url));if(found.isNotEmpty()){pageResults=found;break}}
-                catch(e:kotlinx.coroutines.CancellationException){throw e}
-                catch(e:Exception){failures+=e}
-            }
-            if(pageResults.isEmpty()) break
-            termResults+=pageResults
+        for(url in urls){
+            try{termResults+=extractSeries(getHtml(url))}
+            catch(e:kotlinx.coroutines.CancellationException){throw e}
+            catch(e:Exception){failures+=e}
         }
-        results+=termResults
-        if(termResults.isNotEmpty()) break
+        val unique=termResults.distinctBy{it.kind+":"+it.slug}
+        if(unique.isNotEmpty()) return@withContext unique
     }
-    val unique=results.distinctBy{it.kind+":"+it.slug}
-    if(unique.isEmpty() && failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?:"network error"),failures.first())
-    unique
+    if(failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?:"network error"),failures.first())
+    emptyList()
 }
 
-private suspend fun fetchHome()=withContext(Dispatchers.IO){
-    // Only load the first page of each catalogue section for the home screen.
-    // Search and the explicit catalogue pager handle deeper results on demand.
-    val paths=listOf("/", "/tv/", "/movies/")
+private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
     val results=mutableListOf<Anime>()
+    val paths=listOf("/","/tv/","/movies/")
     for(path in paths){
-        try{
-            results += extractSeries(getHtml("$BASE_URL$path"))
-        }catch(e:kotlinx.coroutines.CancellationException){
-            throw e
-        }catch(_:Exception){
-            // One unavailable section must not blank the whole home screen.
+        val url=when {
+            page==1 -> "$BASE_URL$path"
+            path=="/" -> "$BASE_URL/page/$page/"
+            else -> "$BASE_URL"+path.trimEnd('/')+"/page/$page/"
         }
+        try{results+=extractSeries(getHtml(url))}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(_:Exception){}
     }
-    results.distinctBy{it.kind+":"+it.slug}.take(60)
+    results.distinctBy{it.kind+":"+it.slug}
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
@@ -670,7 +701,7 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
         val index=href.indexOf(marker)
         if(index<0) return@mapNotNull null
         val tail=href.substring(index+marker.length).trim('/')
-        if(tail.isBlank()) return@mapNotNull null
+        if(tail.isBlank() || tail.contains("/")) return@mapNotNull null
         val path=marker.removePrefix("/") + tail
         val container=a.closest("li, article, .item, .row, .item-list, .post, .anime-card, .film")
         val title=(a.selectFirst("h2,h3,h4,.entry-title,.title,.name")?.text()
