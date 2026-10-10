@@ -62,7 +62,7 @@ import java.net.URLEncoder
 import android.content.Context
 import android.util.Base64
 
-private const val SOURCE = "https://animesalt.cx"
+private const val SOURCE = "https://animesalt.me"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
@@ -73,7 +73,7 @@ class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
 }
 
-private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
+private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.me"))
 
 private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
 
@@ -471,7 +471,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         val ep=playingEpisode?:return@LaunchedEffect
         playerLoading=true;playerError=null
         try{
-            val servers=withContext(Dispatchers.IO){fetchPlayerServers(ep.url)}
+            val servers=withContext(Dispatchers.IO){fetchPlayableMedia(ep.url)}
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if(servers.isEmpty()) playerError="No public player was found for this episode."
             else{
@@ -520,7 +520,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             shape=RoundedCornerShape(24.dp),
             containerColor=Color(0xFF14141B),
             title={Text("Episode "+ep.number,color=Color.White,fontWeight=FontWeight.ExtraBold)},
-            text={Text("Play this episode using AnimeSalt's original embedded JWPlayer.",color=Color(0xFF9D9DA8))},
+            text={Text("Play this episode with AniSteam's native video player.",color=Color(0xFF9D9DA8))},
             confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("PLAY",color=colors.primary,fontWeight=FontWeight.Bold)}},
             dismissButton={TextButton(onClick={chosen=null}){Text("CANCEL",color=Color(0xFF858590))}}
         )
@@ -701,7 +701,7 @@ private fun loadContinueWatchingList(context:Context):List<Episode>{
 }
 private fun loadContinueWatching(context:Context):Episode?=loadContinueWatchingList(context).firstOrNull()
 
-private const val BASE_URL = "https://animesalt.cx"
+private const val BASE_URL = "https://animesalt.me"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
     AlertDialog(onDismissRequest=onDismiss,title={Text("Sources")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){SOURCES.forEach { source ->
@@ -991,89 +991,279 @@ private class AnimeSaltChromeClient(
 ){
     val context=LocalContext.current
     val activity=context as ComponentActivity
-    var fullscreen by remember(episode.url){mutableStateOf(false)}
-    val chromeClient=remember(episode.url){
-        AnimeSaltChromeClient(activity){fullscreen=it}
-    }
-
-    BackHandler{
-        if(fullscreen) chromeClient.exitFullscreen() else onBack()
-    }
-
-    // Embed AnimeSalt's own player directly. AniSteam does not add a second
-    // player UI, server picker, episode navigation, or header underneath it.
-    val server=remember(episode.url,episode.servers){
-        episode.servers.firstOrNull{it.name.equals("Embedded",ignoreCase=true)}
-            ?: episode.servers.firstOrNull()
-    }
-
+    val server=remember(episode.url,episode.servers){episode.servers.firstOrNull()}
     if(server==null){
         Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
-            Text("No public AnimeSalt player found",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
+            Text("No playable media link was found.",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.SemiBold)
         }
         return
     }
 
-    AndroidView(
-        factory={ctx->
-            android.webkit.WebView(ctx).apply{
-                settings.javaScriptEnabled=true
-                settings.domStorageEnabled=true
-                settings.mediaPlaybackRequiresUserGesture=false
-                settings.loadsImagesAutomatically=true
-                settings.javaScriptCanOpenWindowsAutomatically=true
-                settings.setSupportMultipleWindows(false)
-                webViewClient=WebViewClient()
-                webChromeClient=chromeClient
-                setBackgroundColor(android.graphics.Color.BLACK)
-                loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
-            }
-        },
-        update={webView->
-            if(webView.url!=server.url && !fullscreen){
-                webView.loadUrl(server.url,mapOf("Referer" to BASE_URL+"/"))
-            }
-        },
-        modifier=Modifier.fillMaxSize().background(Color.Black)
-    )
-}
+    var fullscreen by remember(server.url){mutableStateOf(false)}
+    var controlsVisible by remember(server.url){mutableStateOf(true)}
+    var isPlaying by remember(server.url){mutableStateOf(false)}
+    var buffering by remember(server.url){mutableStateOf(true)}
+    var playbackError by remember(server.url){mutableStateOf<String?>(null)}
+    var positionMs by remember(server.url){mutableLongStateOf(0L)}
+    var durationMs by remember(server.url){mutableLongStateOf(0L)}
+    var scrubbing by remember(server.url){mutableStateOf(false)}
 
-private fun fetchPlayerServers(url:String):List<PlayerServer>{
-    // AniSteam embeds AnimeSalt's real server/player pages only.
-    // It never extracts a raw media URL or substitutes its own player.
-    val page=getHtml(url)
-    val result=mutableListOf<PlayerServer>()
-
-    fun add(name:String,target:String){
-        if(target.isBlank()) return
-        val cleaned=target.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\'','"')
-        val absolute=try{URL(url).let{base->URL(base,cleaned).toString()}}catch(_:Exception){cleaned}
-        if(!absolute.startsWith("http",true)) return
-        if(result.none{it.url==absolute}) result.add(PlayerServer(name,absolute))
+    val player=remember(server.url){androidx.media3.exoplayer.ExoPlayer.Builder(context).build()}
+    LaunchedEffect(player,server.url){
+        val uri=Uri.parse(server.url)
+        val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
+            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true)){
+                setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+            }
+        }.build()
+        player.setMediaItem(item)
+        player.prepare()
+        player.playWhenReady=true
     }
-
-    page.select("iframe[src], iframe[data-src]").forEach { iframe ->
-        val target=iframe.attr("data-src").ifBlank { iframe.attr("src") }
-        if(target.isBlank()) return@forEach
-        val data=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null}
-        if(!data.isNullOrBlank()){
-            try{
-                val decoded=Base64.decode(data,Base64.DEFAULT).toString(Charsets.UTF_8)
-                val entries=JSONArray(decoded)
-                for(i in 0 until entries.length()){
-                    val item=entries.optJSONObject(i) ?: continue
-                    val language=item.optString("language").trim()
-                    val player=item.optString("link").trim()
-                    if(player.isNotBlank()) add(if(language.isNotBlank()) language else "Server "+(i+1),player)
-                }
-            }catch(_:Exception){
-                add("Embedded",target)
+    DisposableEffect(player){
+        val listener=object:androidx.media3.common.Player.Listener{
+            override fun onPlayerError(error:androidx.media3.common.PlaybackException){
+                playbackError=error.message ?: "This video source could not be played."
             }
-        }else{
-            add("Embedded",target)
+            override fun onPlaybackStateChanged(playbackState:Int){
+                buffering=playbackState==androidx.media3.common.Player.STATE_BUFFERING
+            }
+            override fun onIsPlayingChanged(playing:Boolean){isPlaying=playing}
+        }
+        player.addListener(listener)
+        onDispose{
+            player.removeListener(listener)
+            player.release()
         }
     }
-    return result.distinctBy{it.url}
+    LaunchedEffect(player){
+        while(true){
+            if(!scrubbing){
+                positionMs=player.currentPosition.coerceAtLeast(0L)
+                durationMs=player.duration.takeIf{it>0L && it!=androidx.media3.common.C.TIME_UNSET} ?: 0L
+            }
+            isPlaying=player.isPlaying
+            buffering=player.playbackState==androidx.media3.common.Player.STATE_BUFFERING
+            kotlinx.coroutines.delay(350)
+        }
+    }
+    LaunchedEffect(controlsVisible,isPlaying){
+        if(controlsVisible && isPlaying){
+            kotlinx.coroutines.delay(4500)
+            controlsVisible=false
+        }
+    }
+    LaunchedEffect(fullscreen){
+        activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if(fullscreen){
+            activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R){
+                activity.window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+                activity.window.insetsController?.systemBarsBehavior=android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }else{
+                @Suppress("DEPRECATION")
+                activity.window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+            }
+        }else{
+            activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+            else{
+                @Suppress("DEPRECATION")
+                activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
+            }
+        }
+    }
+    DisposableEffect(activity){
+        onDispose{
+            activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+            else{
+                @Suppress("DEPRECATION")
+                activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
+            }
+        }
+    }
+    BackHandler{
+        if(fullscreen) fullscreen=false else onBack()
+    }
+
+    Box(
+        Modifier.fillMaxSize().background(Color.Black)
+            .clickable{controlsVisible=!controlsVisible}
+    ){
+        AndroidView(
+            factory={ctx->
+                androidx.media3.ui.PlayerView(ctx).apply{
+                    useController=false
+                    player=player
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
+                    resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+            },
+            update={view->if(view.player!==player)view.player=player},
+            modifier=Modifier.fillMaxSize()
+        )
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000),Color.Transparent,Color(0xCC000000)))))
+        if(buffering && playbackError==null){
+            CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
+        }
+        if(playbackError!=null){
+            Column(Modifier.align(Alignment.Center).padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                Text("Can't play this source",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick={playbackError=null;player.prepare();player.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){
+                    Text("RETRY",fontWeight=FontWeight.Bold)
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible=controlsVisible,
+            enter=fadeIn(tween(180)),
+            exit=fadeOut(tween(220)),
+            modifier=Modifier.align(Alignment.TopCenter)
+        ){
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),
+                verticalAlignment=Alignment.CenterVertically
+            ){
+                Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){
+                    Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)){
+                    Text("ANISTEAM PLAYER",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
+                    Text(episode.title.ifBlank{"Episode ${episode.number}"},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                }
+                Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){
+                    Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible=controlsVisible,
+            enter=fadeIn(tween(160)),
+            exit=fadeOut(tween(200)),
+            modifier=Modifier.align(Alignment.Center)
+        ){
+            Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
+                Surface(onClick={player.seekTo((player.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){
+                    Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}
+                }
+                Surface(onClick={if(player.isPlaying)player.pause() else player.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){
+                    Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}
+                }
+                Surface(onClick={player.seekTo((player.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){
+                    Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible=controlsVisible,
+            enter=fadeIn(tween(180)),
+            exit=fadeOut(tween(220)),
+            modifier=Modifier.align(Alignment.BottomCenter)
+        ){
+            Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=16.dp)){
+                Slider(
+                    value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f) else 0f,
+                    onValueChange={fraction->
+                        scrubbing=true
+                        positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)
+                    },
+                    onValueChangeFinished={
+                        player.seekTo(positionMs)
+                        scrubbing=false
+                    },
+                    colors=SliderDefaults.colors(thumbColor=colors.primary,activeTrackColor=colors.primary,inactiveTrackColor=Color(0x66777780)),
+                    modifier=Modifier.fillMaxWidth().height(28.dp)
+                )
+                Row(verticalAlignment=Alignment.CenterVertically){
+                    Text(formatPlayerTime(positionMs),color=Color.White,fontSize=11.sp,fontWeight=FontWeight.SemiBold)
+                    Text(" / ",color=Color(0xFF888892),fontSize=11.sp)
+                    Text(formatPlayerTime(durationMs),color=Color(0xFFB6B6C0),fontSize=11.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                }
+            }
+        }
+    }
+}
+
+private fun formatPlayerTime(milliseconds:Long):String{
+    val seconds=(milliseconds.coerceAtLeast(0L)/1000L).toInt()
+    val hours=seconds/3600
+    val minutes=(seconds%3600)/60
+    val remainder=seconds%60
+    return if(hours>0) String.format("%d:%02d:%02d",hours,minutes,remainder)
+    else String.format("%02d:%02d",minutes,remainder)
+}
+
+private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
+    val episodePage=getHtml(episodeUrl)
+    val pageUrls=linkedMapOf<String,String>()
+    val media=linkedMapOf<String,String>()
+
+    fun normalize(raw:String,base:String):String{
+        val cleaned=raw.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\\'','"')
+        return try{URL(base).let{URL(it,cleaned).toString()}}catch(_:Exception){cleaned}
+    }
+    fun isMedia(raw:String):Boolean{
+        val path=try{Uri.parse(raw).path.orEmpty()}catch(_:Exception){raw.substringBefore('?')}
+        return listOf(".m3u8",".mp4",".mpd",".webm",".m4v").any{path.endsWith(it,ignoreCase=true)}
+    }
+    fun inspectDocument(doc:org.jsoup.nodes.Document,base:String,serverName:String){
+        doc.select("video[src],video source[src],source[src],video[data-src]").forEach{node->
+            val raw=node.attr("src").ifBlank{node.attr("data-src")}
+            if(raw.isNotBlank()){
+                val target=normalize(raw,base)
+                if(isMedia(target)) media.putIfAbsent(target,serverName)
+            }
+        }
+        val scripts=doc.select("script").joinToString("\\n"){it.data().ifBlank{it.html()}}
+        val quoted=Regex("""(?i)["'](?:file|src|source|url)["']\\s*:\\s*["']([^"']+)["']""")
+        quoted.findAll(scripts).forEach{match->
+            val target=normalize(match.groupValues[1],base)
+            if(isMedia(target)) media.putIfAbsent(target,serverName)
+        }
+        val urls=Regex("""(?i)(?:https?:\\?/\\?/|//)[^"'\\s<>]+?\\.(?:m3u8|mp4|mpd|webm|m4v)(?:\\?[^"'\\s<>]*)?""")
+        urls.findAll(scripts).forEach{match->
+            val target=normalize(match.value,base)
+            if(isMedia(target)) media.putIfAbsent(target,serverName)
+        }
+        doc.select("iframe[src],iframe[data-src]").forEach{iframe->
+            val raw=iframe.attr("data-src").ifBlank{iframe.attr("src")}
+            if(raw.isBlank())return@forEach
+            val target=normalize(raw,base)
+            if(target.startsWith("http",true)) pageUrls.putIfAbsent(target,serverName)
+            val encoded=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null}
+            if(!encoded.isNullOrBlank()){
+                try{
+                    val entries=JSONArray(Base64.decode(encoded,Base64.DEFAULT).toString(Charsets.UTF_8))
+                    for(i in 0 until entries.length()){
+                        val item=entries.optJSONObject(i)?:continue
+                        val link=item.optString("link").trim()
+                        if(link.isNotBlank()){
+                            val playerUrl=normalize(link,base)
+                            pageUrls.putIfAbsent(playerUrl,item.optString("language").ifBlank{"Server ${i+1}"})
+                        }
+                    }
+                }catch(_:Exception){}
+            }
+        }
+    }
+
+    inspectDocument(episodePage,episodeUrl,"AnimeSalt")
+    for((pageUrl,name) in pageUrls.entries.take(8)){
+        if(media.isNotEmpty())break
+        try{inspectDocument(getHtml(pageUrl),pageUrl,name)}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(_:Exception){}
+    }
+    return media.map{(url,name)->PlayerServer(name,url)}
 }
 
 private val sourceHttpClient by lazy {
