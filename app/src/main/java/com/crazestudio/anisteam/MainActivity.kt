@@ -609,15 +609,44 @@ private const val BASE_URL = "https://animesalt.cx"
 
 private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
-    val encoded=URLEncoder.encode(q,"UTF-8")
-    val results=mutableListOf<Anime>()
-    for(page in 1..5){
-        val url=if(page==1) "$BASE_URL/?s=$encoded" else "$BASE_URL/page/$page/?s=$encoded"
-        val pageResults=extractSeries(getHtml(url))
-        results += pageResults
-        if(pageResults.isEmpty()) break
+
+    // Try the full phrase first, then broader terms if AnimeSalt returns no
+    // results for a multi-word query (e.g. "Doraemon new movie in India").
+    val normalized=q.trim().replace(Regex("\\s+")," ")
+    val queries=buildList {
+        add(normalized)
+        normalized.split(" ").filter { it.length >= 3 }
+            .sortedByDescending { it.length }
+            .forEach { term -> if(none { it.equals(term,ignoreCase=true) }) add(term) }
     }
-    results.distinctBy{it.kind+":"+it.slug}.take(100)
+
+    val results=mutableListOf<Anime>()
+    val failures=mutableListOf<Exception>()
+    for(term in queries){
+        val encoded=URLEncoder.encode(term,"UTF-8")
+        val termResults=mutableListOf<Anime>()
+        for(page in 1..5){
+            val url=if(page==1) "$BASE_URL/?s=$encoded" else "$BASE_URL/page/$page/?s=$encoded"
+            try{
+                val pageResults=extractSeries(getHtml(url))
+                termResults += pageResults
+                if(pageResults.isEmpty()) break
+            }catch(e:kotlinx.coroutines.CancellationException){
+                throw e
+            }catch(e:Exception){
+                failures += e
+                break
+            }
+        }
+        results += termResults
+        if(termResults.isNotEmpty()) break
+    }
+
+    val unique=results.distinctBy{it.kind+":"+it.slug}.take(100)
+    if(unique.isEmpty() && failures.isNotEmpty()){
+        throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?: "network error"),failures.first())
+    }
+    unique
 }
 
 private suspend fun fetchHome()=withContext(Dispatchers.IO){
