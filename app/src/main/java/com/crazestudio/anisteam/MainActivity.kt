@@ -769,8 +769,9 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
     }
     return anchors.mapNotNull { (href,a) ->
         val marker=listOf("/series/","/movies/","/tv/","/movie/").firstOrNull{href.contains(it,ignoreCase=true)} ?: return@mapNotNull null
-        val slug=href.substringAfter(marker).trim('/')
-        if(slug.isBlank()) return@mapNotNull null
+        val tail=href.substringAfter(marker).trim('/')
+        if(tail.isBlank()) return@mapNotNull null
+        val sourcePath=marker.removePrefix("/") + tail
         val container=a.closest("li, article, .item, .row, .item-list, .post, .anime-card, .film, .movie-item, .series-item, .flw-item, .bs") ?: a.parent()
         val imageElement=a.selectFirst("img, source") ?: container?.selectFirst("img, source")
         val title=(a.selectFirst("h2,h3,h4,.entry-title,.title,.name,.film-name,.tt")?.text()
@@ -779,7 +780,7 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
             .replace(Regex("\\s+")," ").trim()
         if(title.isBlank()) return@mapNotNull null
         val kind=if(marker.contains("movie",ignoreCase=true)) "movie" else "series"
-        Anime(slug.hashCode(),title,posterFrom(imageElement),"—","?","Anime",slug,"animesalt",1,slug,kind)
+        Anime(sourcePath.hashCode(),title,posterFrom(imageElement),"—","?","Anime",sourcePath,"animesalt",1,sourcePath,kind)
     }.distinctBy{it.kind+":"+it.slug}
 }
 
