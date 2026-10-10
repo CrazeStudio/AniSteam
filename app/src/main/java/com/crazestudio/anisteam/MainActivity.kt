@@ -120,12 +120,13 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     var catalogPage by remember{mutableIntStateOf(1)}
     var hasMore by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
+    var catalogReload by remember{mutableIntStateOf(0)}
     val submitSearch = {
         submitted=q.trim()
         catalogPage=1
     }
 
-    LaunchedEffect(submitted){
+    LaunchedEffect(submitted,catalogReload){
         catalogPage=1
         loading=true
         loadingMore=false
