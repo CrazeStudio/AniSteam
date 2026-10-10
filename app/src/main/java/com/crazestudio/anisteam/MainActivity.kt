@@ -59,7 +59,7 @@ import java.net.URLEncoder
 import android.content.Context
 import android.util.Base64
 
-private const val SOURCE = "https://animesalt.cx"
+private const val SOURCE = "https://animesalt.me"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
@@ -70,7 +70,7 @@ class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
 }
 
-private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
+private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.me"))
 
 private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
 
@@ -599,7 +599,7 @@ private fun loadContinueWatchingList(context:Context):List<Episode>{
 }
 private fun loadContinueWatching(context:Context):Episode?=loadContinueWatchingList(context).firstOrNull()
 
-private const val BASE_URL = "https://animesalt.cx"
+private const val BASE_URL = "https://animesalt.me"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
     AlertDialog(onDismissRequest=onDismiss,title={Text("Sources")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){SOURCES.forEach { source ->
@@ -610,8 +610,6 @@ private const val BASE_URL = "https://animesalt.cx"
 private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     if(q.isBlank()) return@withContext fetchHome()
 
-    // Try the full phrase first, then broader terms if AnimeSalt returns no
-    // results for a multi-word query (e.g. "Doraemon new movie in India").
     val normalized=q.trim().replace(Regex("\\s+")," ")
     val queries=buildList {
         add(normalized)
@@ -625,18 +623,16 @@ private suspend fun fetchAnime(q:String)=withContext(Dispatchers.IO){
     for(term in queries){
         val encoded=URLEncoder.encode(term,"UTF-8")
         val termResults=mutableListOf<Anime>()
-        for(page in 1..5){
-            val url=if(page==1) "$BASE_URL/?s=$encoded" else "$BASE_URL/page/$page/?s=$encoded"
+        val urls=listOf("$BASE_URL/?s=$encoded","$BASE_URL/tv/?s=$encoded","$BASE_URL/movies/?s=$encoded")
+        for(url in urls){
             try{
-                val pageResults=extractSeries(getHtml(url))
-                termResults += pageResults
-                if(pageResults.isEmpty()) break
+                termResults += extractSeries(getHtml(url))
             }catch(e:kotlinx.coroutines.CancellationException){
                 throw e
             }catch(e:Exception){
                 failures += e
-                break
             }
+            if(termResults.distinctBy{it.kind+":"+it.slug}.isNotEmpty()) break
         }
         results += termResults
         if(termResults.isNotEmpty()) break
@@ -656,31 +652,45 @@ private suspend fun fetchHome()=withContext(Dispatchers.IO){
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
     return doc.select("a[href]").mapNotNull { a ->
-        val href=a.absUrl("href").ifBlank { a.attr("href") }
+        val href=a.absUrl("href").ifBlank { a.attr("href") }.substringBefore('?').substringBefore('#').trimEnd('/')
         val marker=when {
             href.contains("/series/",ignoreCase=true) -> "/series/"
             href.contains("/movies/",ignoreCase=true) -> "/movies/"
+            href.contains("/tv/",ignoreCase=true) -> "/tv/"
+            href.contains("/movie/",ignoreCase=true) -> "/movie/"
             else -> return@mapNotNull null
         }
         val index=href.indexOf(marker)
         if(index<0) return@mapNotNull null
-        val slug=href.substring(index+marker.length).trim('/').substringBefore('?').substringBefore('#')
-        if(slug.isBlank()) return@mapNotNull null
-        val container=a.closest("li, article, .item, .row, .item-list")
-        val title=(a.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: container?.selectFirst("h2,h3,h4,.entry-title,.title")?.text() ?: a.text()).trim()
+        val tail=href.substring(index+marker.length).trim('/')
+        if(tail.isBlank()) return@mapNotNull null
+        val path=marker.removePrefix("/") + tail
+        val container=a.closest("li, article, .item, .row, .item-list, .post, .anime-card, .film")
+        val title=(a.selectFirst("h2,h3,h4,.entry-title,.title,.name")?.text()
+            ?: container?.selectFirst("h2,h3,h4,.entry-title,.title,.name")?.text()
+            ?: a.attr("title").ifBlank { a.text() }).replace(Regex("\\s+")," ").trim()
         if(title.isBlank()) return@mapNotNull null
         val image=posterFrom(a.selectFirst("img") ?: container?.selectFirst("img"))
-        Anime(slug.hashCode(),title,image,"—","?","Anime",slug,"animesalt",1,slug,if(marker=="/movies/") "movie" else "series")
-    }.distinctBy{it.synopsis}
+        val kind=if(marker.contains("movie",ignoreCase=true)) "movie" else "series"
+        Anime(path.hashCode(),title,image,"—","?","Anime",path,"animesalt",1,path,kind)
+    }.distinctBy{it.kind+":"+it.slug}
 }
 
-
 private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
-    val seriesUrl="$BASE_URL/series/$slug/"
-    val movieUrl="$BASE_URL/movies/$slug/"
+    val normalized=slug.trim('/')
+    val prefix=normalized.substringBefore('/')
+    val directPath=prefix in listOf("tv","series","movie","movies")
+    val directUrl=if(directPath) "$BASE_URL/$normalized/" else null
+    val seriesUrl=directUrl ?: "$BASE_URL/series/$normalized/"
+    val movieUrl=directUrl ?: "$BASE_URL/movies/$normalized/"
     val seriesDoc=try{getHtml(seriesUrl)}catch(_:Exception){null}
     val doc=if(seriesDoc?.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.isNotBlank()==true) seriesDoc else getHtml(movieUrl)
-    val kind=if(doc===seriesDoc) "series" else "movie"
+    val kind=when {
+        prefix=="movie" || prefix=="movies" -> "movie"
+        prefix=="tv" || prefix=="series" -> "series"
+        doc===seriesDoc -> "series"
+        else -> "movie"
+    }
     val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
     if(title.isBlank()) throw IllegalStateException("Anime not found")
     val description=doc.selectFirst(".description, .desc, [class*=description]")
@@ -693,11 +703,12 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Movie".takeIf{kind=="movie"}?:"Anime",slug,"animesalt",if(kind=="movie") 1 else seasonCount,slug,kind)
+    Anime(slug.hashCode(),title,poster,rating,episodes,"Movie".takeIf{kind=="movie"}?:"Anime",overview,"animesalt",if(kind=="movie") 1 else seasonCount,slug,kind)
 }
 
 private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
-    val url="$BASE_URL/movies/$slug/"
+    val normalized=slug.trim('/')
+    val url=if(normalized.substringBefore('/') in listOf("movie","movies")) "$BASE_URL/$normalized/" else "$BASE_URL/movies/$normalized/"
     val doc=getHtml(url)
     val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
     if(title.isBlank()) return@withContext emptyList<Episode>()
@@ -705,7 +716,9 @@ private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
-    val seriesUrl="$BASE_URL/series/$slug/"
+    val normalized=slug.trim('/')
+    val prefix=normalized.substringBefore('/')
+    val seriesUrl=if(prefix in listOf("tv","series")) "$BASE_URL/$normalized/" else "$BASE_URL/series/$normalized/"
     val seriesDoc=getHtml(seriesUrl)
 
     // AnimeSalt owns the season grouping. AniSteam follows every AnimeSalt
