@@ -59,7 +59,7 @@ import java.net.URLEncoder
 import android.content.Context
 import android.util.Base64
 
-private const val SOURCE = "https://animesalt.me"
+private const val SOURCE = "https://animesalt.cx"
 
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
@@ -70,7 +70,7 @@ class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
 }
 
-private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.me"))
+private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
 
 private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
 
@@ -599,7 +599,7 @@ private fun loadContinueWatchingList(context:Context):List<Episode>{
 }
 private fun loadContinueWatching(context:Context):Episode?=loadContinueWatchingList(context).firstOrNull()
 
-private const val BASE_URL = "https://animesalt.me"
+private const val BASE_URL = "https://animesalt.cx"
 
 @Composable private fun SourceDialog(onDismiss:()->Unit) {
     AlertDialog(onDismissRequest=onDismiss,title={Text("Sources")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){SOURCES.forEach { source ->
@@ -729,8 +729,22 @@ private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
     val normalized=slug.trim('/')
     val prefix=normalized.substringBefore('/')
-    val seriesUrl=if(prefix in listOf("tv","series")) "$BASE_URL/$normalized/" else "$BASE_URL/tv/$normalized/"
-    val seriesDoc=getHtml(seriesUrl)
+    val candidates=if(prefix in listOf("tv","series")) listOf("$BASE_URL/$normalized/") else listOf(
+        "$BASE_URL/series/$normalized/",
+        "$BASE_URL/tv/$normalized/"
+    )
+    var loaded:org.jsoup.nodes.Document?=null
+    var lastError:Exception?=null
+    for(url in candidates){
+        try{
+            val doc=getHtml(url)
+            val hasTitle=doc.selectFirst("h1.entry-title, .fg1 .entry-title, h1")?.text()?.isNotBlank()==true
+            val hasEpisodes=doc.select("a[href*=/episode/]").isNotEmpty()
+            if(hasTitle || hasEpisodes){ loaded=doc; if(hasEpisodes) break }
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){lastError=e}
+    }
+    val seriesDoc=loaded ?: throw java.io.IOException("Could not load AnimeSalt series page"+(lastError?.message?.let{": $it"}?:""),lastError)
     val seasonButtons=seriesDoc.select(".season-btn[data-season][data-post], [data-season][data-post], [data-season][data-id]")
         .mapNotNull { button ->
             val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
