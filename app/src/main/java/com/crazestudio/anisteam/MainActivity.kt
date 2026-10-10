@@ -999,7 +999,6 @@ private class AnimeSaltChromeClient(
         }
         return
     }
-
     var fullscreen by remember(server.url){mutableStateOf(false)}
     var controlsVisible by remember(server.url){mutableStateOf(true)}
     var isPlaying by remember(server.url){mutableStateOf(false)}
@@ -1008,51 +1007,38 @@ private class AnimeSaltChromeClient(
     var positionMs by remember(server.url){mutableLongStateOf(0L)}
     var durationMs by remember(server.url){mutableLongStateOf(0L)}
     var scrubbing by remember(server.url){mutableStateOf(false)}
-
-    val player=remember(server.url){androidx.media3.exoplayer.ExoPlayer.Builder(context).build()}
-    LaunchedEffect(player,server.url){
+    val exoPlayer=remember(server.url){androidx.media3.exoplayer.ExoPlayer.Builder(context).build()}
+    LaunchedEffect(exoPlayer,server.url){
         val uri=Uri.parse(server.url)
         val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
-            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true)){
-                setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
-            }
+            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true)) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
         }.build()
-        player.setMediaItem(item)
-        player.prepare()
-        player.playWhenReady=true
+        exoPlayer.setMediaItem(item)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady=true
     }
-    DisposableEffect(player){
+    DisposableEffect(exoPlayer){
         val listener=object:androidx.media3.common.Player.Listener{
-            override fun onPlayerError(error:androidx.media3.common.PlaybackException){
-                playbackError=error.message ?: "This video source could not be played."
-            }
-            override fun onPlaybackStateChanged(playbackState:Int){
-                buffering=playbackState==androidx.media3.common.Player.STATE_BUFFERING
-            }
+            override fun onPlayerError(error:androidx.media3.common.PlaybackException){playbackError=error.message ?: "This video source could not be played."}
+            override fun onPlaybackStateChanged(playbackState:Int){buffering=playbackState==androidx.media3.common.Player.STATE_BUFFERING}
             override fun onIsPlayingChanged(playing:Boolean){isPlaying=playing}
         }
-        player.addListener(listener)
-        onDispose{
-            player.removeListener(listener)
-            player.release()
-        }
+        exoPlayer.addListener(listener)
+        onDispose{exoPlayer.removeListener(listener);exoPlayer.release()}
     }
-    LaunchedEffect(player){
+    LaunchedEffect(exoPlayer){
         while(true){
             if(!scrubbing){
-                positionMs=player.currentPosition.coerceAtLeast(0L)
-                durationMs=player.duration.takeIf{it>0L && it!=androidx.media3.common.C.TIME_UNSET} ?: 0L
+                positionMs=exoPlayer.currentPosition.coerceAtLeast(0L)
+                durationMs=exoPlayer.duration.takeIf{it>0L && it!=androidx.media3.common.C.TIME_UNSET} ?: 0L
             }
-            isPlaying=player.isPlaying
-            buffering=player.playbackState==androidx.media3.common.Player.STATE_BUFFERING
+            isPlaying=exoPlayer.isPlaying
+            buffering=exoPlayer.playbackState==androidx.media3.common.Player.STATE_BUFFERING
             kotlinx.coroutines.delay(350)
         }
     }
     LaunchedEffect(controlsVisible,isPlaying){
-        if(controlsVisible && isPlaying){
-            kotlinx.coroutines.delay(4500)
-            controlsVisible=false
-        }
+        if(controlsVisible && isPlaying){kotlinx.coroutines.delay(4500);controlsVisible=false}
     }
     LaunchedEffect(fullscreen){
         activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1085,100 +1071,56 @@ private class AnimeSaltChromeClient(
             }
         }
     }
-    BackHandler{
-        if(fullscreen) fullscreen=false else onBack()
-    }
-
-    Box(
-        Modifier.fillMaxSize().background(Color.Black)
-            .clickable{controlsVisible=!controlsVisible}
-    ){
+    BackHandler{if(fullscreen) fullscreen=false else onBack()}
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable{controlsVisible=!controlsVisible}){
         AndroidView(
             factory={ctx->
                 androidx.media3.ui.PlayerView(ctx).apply{
                     useController=false
-                    player=player
+                    this.player=exoPlayer
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
                     resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
             },
-            update={view->if(view.player!==player)view.player=player},
+            update={view->if(view.player!==exoPlayer)view.player=exoPlayer},
             modifier=Modifier.fillMaxSize()
         )
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000),Color.Transparent,Color(0xCC000000)))))
-        if(buffering && playbackError==null){
-            CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
-        }
+        if(buffering && playbackError==null) CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
         if(playbackError!=null){
             Column(Modifier.align(Alignment.Center).padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
                 Text("Can't play this source",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick={playbackError=null;player.prepare();player.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){
-                    Text("RETRY",fontWeight=FontWeight.Bold)
-                }
+                Button(onClick={playbackError=null;exoPlayer.prepare();exoPlayer.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("RETRY",fontWeight=FontWeight.Bold)}
             }
         }
-        AnimatedVisibility(
-            visible=controlsVisible,
-            enter=fadeIn(tween(180)),
-            exit=fadeOut(tween(220)),
-            modifier=Modifier.align(Alignment.TopCenter)
-        ){
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),
-                verticalAlignment=Alignment.CenterVertically
-            ){
-                Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){
-                    Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}
-                }
+        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.TopCenter)){
+            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
+                Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}}
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)){
                     Text("ANISTEAM PLAYER",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
-                    Text(episode.title.ifBlank{"Episode ${episode.number}"},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                    Text(episode.title.ifBlank{"Episode " + episode.number},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
                 }
-                Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){
-                    Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}
-                }
+                Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}}
             }
         }
-        AnimatedVisibility(
-            visible=controlsVisible,
-            enter=fadeIn(tween(160)),
-            exit=fadeOut(tween(200)),
-            modifier=Modifier.align(Alignment.Center)
-        ){
+        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(160)),exit=fadeOut(tween(200)),modifier=Modifier.align(Alignment.Center)){
             Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
-                Surface(onClick={player.seekTo((player.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){
-                    Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}
-                }
-                Surface(onClick={if(player.isPlaying)player.pause() else player.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){
-                    Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}
-                }
-                Surface(onClick={player.seekTo((player.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){
-                    Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}
-                }
+                Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
+                Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause() else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
+                Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
             }
         }
-        AnimatedVisibility(
-            visible=controlsVisible,
-            enter=fadeIn(tween(180)),
-            exit=fadeOut(tween(220)),
-            modifier=Modifier.align(Alignment.BottomCenter)
-        ){
+        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.BottomCenter)){
             Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=16.dp)){
                 Slider(
                     value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f) else 0f,
-                    onValueChange={fraction->
-                        scrubbing=true
-                        positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)
-                    },
-                    onValueChangeFinished={
-                        player.seekTo(positionMs)
-                        scrubbing=false
-                    },
+                    onValueChange={fraction->scrubbing=true;positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)},
+                    onValueChangeFinished={exoPlayer.seekTo(positionMs);scrubbing=false},
                     colors=SliderDefaults.colors(thumbColor=colors.primary,activeTrackColor=colors.primary,inactiveTrackColor=Color(0x66777780)),
                     modifier=Modifier.fillMaxWidth().height(28.dp)
                 )
@@ -1199,17 +1141,15 @@ private fun formatPlayerTime(milliseconds:Long):String{
     val hours=seconds/3600
     val minutes=(seconds%3600)/60
     val remainder=seconds%60
-    return if(hours>0) String.format("%d:%02d:%02d",hours,minutes,remainder)
-    else String.format("%02d:%02d",minutes,remainder)
+    return if(hours>0) String.format("%d:%02d:%02d",hours,minutes,remainder) else String.format("%02d:%02d",minutes,remainder)
 }
 
 private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
     val episodePage=getHtml(episodeUrl)
     val pageUrls=linkedMapOf<String,String>()
     val media=linkedMapOf<String,String>()
-
     fun normalize(raw:String,base:String):String{
-        val cleaned=raw.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().trim('\\'','"')
+        val cleaned=raw.replace("\\u0026","&").replace("\\/","/").replace("&amp;","&").trim().removeSurrounding("\"").removeSurrounding("'")
         return try{URL(base).let{URL(it,cleaned).toString()}}catch(_:Exception){cleaned}
     }
     fun isMedia(raw:String):Boolean{
@@ -1219,27 +1159,24 @@ private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
     fun inspectDocument(doc:org.jsoup.nodes.Document,base:String,serverName:String){
         doc.select("video[src],video source[src],source[src],video[data-src]").forEach{node->
             val raw=node.attr("src").ifBlank{node.attr("data-src")}
-            if(raw.isNotBlank()){
-                val target=normalize(raw,base)
-                if(isMedia(target)) media.putIfAbsent(target,serverName)
-            }
+            if(raw.isNotBlank()){val target=normalize(raw,base);if(isMedia(target))media.putIfAbsent(target,serverName)}
         }
-        val scripts=doc.select("script").joinToString("\\n"){it.data().ifBlank{it.html()}}
-        val quoted=Regex("""(?i)["'](?:file|src|source|url)["']\\s*:\\s*["']([^"']+)["']""")
+        val scripts=doc.select("script").joinToString("\n"){it.data().ifBlank{it.html()}}
+        val quoted=Regex("""(?i)["'](?:file|src|source|url)["']\s*:\s*["']([^"']+)["']""")
         quoted.findAll(scripts).forEach{match->
             val target=normalize(match.groupValues[1],base)
-            if(isMedia(target)) media.putIfAbsent(target,serverName)
+            if(isMedia(target))media.putIfAbsent(target,serverName)
         }
-        val urls=Regex("""(?i)(?:https?:\\?/\\?/|//)[^"'\\s<>]+?\\.(?:m3u8|mp4|mpd|webm|m4v)(?:\\?[^"'\\s<>]*)?""")
+        val urls=Regex("""(?i)(?:https?:\\?/\\?/|//)[^"'\s<>]+?\.(?:m3u8|mp4|mpd|webm|m4v)(?:\?[^"'\s<>]*)?""")
         urls.findAll(scripts).forEach{match->
             val target=normalize(match.value,base)
-            if(isMedia(target)) media.putIfAbsent(target,serverName)
+            if(isMedia(target))media.putIfAbsent(target,serverName)
         }
         doc.select("iframe[src],iframe[data-src]").forEach{iframe->
             val raw=iframe.attr("data-src").ifBlank{iframe.attr("src")}
             if(raw.isBlank())return@forEach
             val target=normalize(raw,base)
-            if(target.startsWith("http",true)) pageUrls.putIfAbsent(target,serverName)
+            if(target.startsWith("http",true))pageUrls.putIfAbsent(target,serverName)
             val encoded=try{Uri.parse(target).getQueryParameter("data")}catch(_:Exception){null}
             if(!encoded.isNullOrBlank()){
                 try{
@@ -1247,16 +1184,12 @@ private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
                     for(i in 0 until entries.length()){
                         val item=entries.optJSONObject(i)?:continue
                         val link=item.optString("link").trim()
-                        if(link.isNotBlank()){
-                            val playerUrl=normalize(link,base)
-                            pageUrls.putIfAbsent(playerUrl,item.optString("language").ifBlank{"Server ${i+1}"})
-                        }
+                        if(link.isNotBlank())pageUrls.putIfAbsent(normalize(link,base),item.optString("language").ifBlank{"Server " + (i+1)})
                     }
                 }catch(_:Exception){}
             }
         }
     }
-
     inspectDocument(episodePage,episodeUrl,"AnimeSalt")
     for((pageUrl,name) in pageUrls.entries.take(8)){
         if(media.isNotEmpty())break
