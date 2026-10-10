@@ -1095,11 +1095,9 @@ private class AnimeSaltChromeClient(
             update={view->if(webView!==view)webView=view},
             modifier=Modifier.fillMaxSize()
         )
-        Box(
-            Modifier.fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color(0xB8000000),Color.Transparent,Color(0xD9000000))))
-                .clickable{controlsVisible=!controlsVisible}
-        )
+        // Avoid blocking taps intended for the embedded video.
+        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(112.dp).background(Brush.verticalGradient(listOf(Color(0xB8000000),Color.Transparent))).clickable{controlsVisible=!controlsVisible})
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(100.dp).background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xD9000000)))).clickable{controlsVisible=!controlsVisible})
         if(controlsVisible){
             Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal=14.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
                 Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x880D0D12)){
