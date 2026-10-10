@@ -43,6 +43,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -117,6 +120,10 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     var catalogPage by remember{mutableIntStateOf(1)}
     var hasMore by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
+    val submitSearch = {
+        submitted=q.trim()
+        catalogPage=1
+    }
 
     LaunchedEffect(submitted){
         catalogPage=1
@@ -157,8 +164,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
 
     val featured=data.firstOrNull()
     val discover=data.drop(1).take(12)
-    val trending=data.drop(4).take(12)
-    val fresh=data.drop(16).take(12)
+    val trending=data.drop(13).take(12)
+    val fresh=data.drop(25).take(12)
 
     LazyColumn(
         Modifier.fillMaxSize().background(Color(0xFF07070B)),
@@ -195,6 +202,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     modifier=Modifier.fillMaxWidth().height(58.dp),
                     singleLine=true,
                     shape=RoundedCornerShape(18.dp),
+                    keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
+                    keyboardActions=KeyboardActions(onSearch={submitSearch()}),
                     colors=OutlinedTextFieldDefaults.colors(
                         focusedBorderColor=colors.primary,
                         unfocusedBorderColor=Color(0xFF24242D),
@@ -204,9 +213,12 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     ),
                     placeholder={Text("Search anime...",color=Color(0xFF666671),fontSize=14.sp)},
                     trailingIcon={
-                        if(q.isNotBlank()){
-                            TextButton(onClick={submitted=q.trim()}){
-                                Text("SEARCH",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                        Row(verticalAlignment=Alignment.CenterVertically){
+                            if(q.isNotBlank()) TextButton(onClick={q=""}){
+                                Text("CLEAR",color=Color(0xFF777783),fontSize=9.sp,fontWeight=FontWeight.Bold)
+                            }
+                            TextButton(onClick={submitSearch}){
+                                Text("GO",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -218,7 +230,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             item{
                 Spacer(Modifier.height(18.dp))
                 Box(
-                    Modifier.fillMaxWidth().height(410.dp)
+                    Modifier.fillMaxWidth().height(350.dp)
                         .padding(horizontal=18.dp)
                         .clip(RoundedCornerShape(26.dp))
                         .clickable{onOpen(featured.slug)}
@@ -297,12 +309,16 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         }
 
         if(submitted.isBlank() && discover.isNotEmpty()){
-            item{SectionHeader("DISCOVER","Explore something new")}
+            item{SectionHeader("EXPLORE","A few picks from AnimeSalt")}
             item{AnimeRail(discover,onOpen)}
-            item{SectionHeader("TRENDING","Popular right now")}
-            item{AnimeRail(trending,onOpen)}
-            item{SectionHeader("JUST ADDED","Fresh from AnimeSalt")}
-            item{AnimeRail(fresh,onOpen)}
+            if(trending.isNotEmpty()){
+                item{SectionHeader("MORE TO DISCOVER","Keep exploring")}
+                item{AnimeRail(trending,onOpen)}
+            }
+            if(fresh.isNotEmpty()){
+                item{SectionHeader("MORE TITLES","More from the catalogue")}
+                item{AnimeRail(fresh,onOpen)}
+            }
         }
 
         item{
@@ -310,11 +326,14 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                 Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=18.dp),
                 verticalAlignment=Alignment.CenterVertically
             ){
-                Text(
-                    if(submitted.isBlank())"ALL ANIME" else "SEARCH RESULTS",
-                    color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold
-                )
-                Spacer(Modifier.weight(1f))
+                Column(Modifier.weight(1f)){
+                    Text(
+                        if(submitted.isBlank())"ALL ANIME" else "SEARCH RESULTS",
+                        color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold
+                    )
+                    if(data.isNotEmpty()) Text("${data.size} titles loaded",color=Color(0xFF777783),fontSize=11.sp)
+                }
+                Spacer(Modifier.width(8.dp))
                 if(submitted.isNotBlank()){
                     TextButton(onClick={q="";submitted=""}){
                         Text("CLEAR",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)
@@ -348,7 +367,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         Box(Modifier.fillMaxWidth().padding(20.dp),contentAlignment=Alignment.Center){
                             if(loadingMore) CircularProgressIndicator(color=colors.primary,strokeWidth=2.dp)
                             else Button(onClick={catalogPage+=1},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){
-                                Text("LOAD MORE ANIME",color=Color.White,fontWeight=FontWeight.Bold)
+                                Text("LOAD MORE",color=Color.White,fontWeight=FontWeight.Bold)
                             }
                         }
                     }
@@ -368,7 +387,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             Spacer(Modifier.height(3.dp))
             Text(subtitle,color=Color.White,fontSize=18.sp,fontWeight=FontWeight.ExtraBold)
         }
-        Text("›",color=Color(0xFF666671),fontSize=22.sp)
+        Spacer(Modifier.width(2.dp))
     }
 }
 
@@ -425,6 +444,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     var loading by remember{mutableStateOf(true)}
     var error by remember{mutableStateOf<String?>(null)}
     var chosen by remember{mutableStateOf<Episode?>(null)}
+    var episodeQuery by remember{mutableStateOf("")}
+    var episodeReload by remember{mutableIntStateOf(0)}
     
     var playingEpisode by remember{mutableStateOf<Episode?>(null)}
     var playerLoading by remember{mutableStateOf(false)}
@@ -437,7 +458,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         catch(e:Exception){error=e.message?:"Unable to load details."}
         finally{loading=false}
     }
-    LaunchedEffect(slug,anime){
+    LaunchedEffect(slug,anime,episodeReload){
         if(anime==null)return@LaunchedEffect
         loading=true;error=null
         try{eps=if(anime!!.kind=="movie") fetchMovieEpisode(slug) else fetchEpisodesBySlug(slug,anime!!.seasons)}
@@ -460,6 +481,13 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         }catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){playerError="Could not load this episode player: "+(e.message?:"network error")}
         finally{playerLoading=false}
+    }
+
+    val visibleEpisodes=remember(eps,episodeQuery){
+        val term=episodeQuery.trim()
+        if(term.isBlank()) eps else eps.filter {
+            it.number.toString().contains(term,true) || it.title.contains(term,true)
+        }
     }
 
     if(playingEpisode!=null){
@@ -519,7 +547,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=42.dp)){
                 item{
                     Box(
-                        Modifier.fillMaxWidth().height(430.dp)
+                        Modifier.fillMaxWidth().height(350.dp)
                             .clip(RoundedCornerShape(bottomStart=30.dp,bottomEnd=30.dp))
                     ){
                         AsyncImage(anime!!.image,anime!!.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
@@ -565,11 +593,28 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         Row(verticalAlignment=Alignment.CenterVertically){
                             Column(Modifier.weight(1f)){
                                 Text("Episodes",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black)
-                                Text("Pick up where you left off",color=Color(0xFF777783),fontSize=10.sp)
+                                Text(if(eps.isEmpty())"AnimeSalt episode list" else "${eps.size} episodes available",color=Color(0xFF777783),fontSize=11.sp)
                             }
-                            Text(eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
+                            Text(if(loading)"…" else eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
                         }
                         Spacer(Modifier.height(12.dp))
+                        if(!loading && eps.isNotEmpty()){
+                            OutlinedTextField(
+                                value=episodeQuery,
+                                onValueChange={episodeQuery=it},
+                                modifier=Modifier.fillMaxWidth().height(56.dp),
+                                singleLine=true,
+                                shape=RoundedCornerShape(15.dp),
+                                placeholder={Text("Find episode by number or title",color=Color(0xFF666671),fontSize=12.sp)},
+                                colors=OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor=colors.primary,
+                                    unfocusedBorderColor=Color(0xFF24242D),
+                                    cursorColor=colors.primary,
+                                    focusedContainerColor=Color(0xFF111117),
+                                    unfocusedContainerColor=Color(0xFF111117)
+                                )
+                            )
+                        }
                     }
                 }
                 if(loading){
@@ -579,7 +624,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         }
                     }
                 }else{
-                    items(eps,key={it.url}){ep->
+                    items(visibleEpisodes,key={it.url}){ep->
                         Row(
                             Modifier.padding(horizontal=18.dp,vertical=4.dp).fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp)).background(Color(0xFF121217))
@@ -593,6 +638,26 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                             }
                             Box(Modifier.size(36.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B1B24)),contentAlignment=Alignment.Center){
                                 Text("▶",color=colors.primary,fontSize=10.sp)
+                            }
+                        }
+                    }
+                    if(visibleEpisodes.isEmpty() && eps.isNotEmpty()){
+                        item{
+                            Box(Modifier.fillMaxWidth().padding(24.dp),contentAlignment=Alignment.Center){
+                                Text("No episodes match this search.",color=Color(0xFF858590),fontSize=12.sp)
+                            }
+                        }
+                    }
+                    if(!loading && eps.isEmpty()){
+                        item{
+                            Column(Modifier.fillMaxWidth().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                                Text("Episodes couldn't be loaded",color=Color.White,fontSize=15.sp,fontWeight=FontWeight.Bold)
+                                Spacer(Modifier.height(6.dp))
+                                Text(error ?: "AnimeSalt returned no episode links.",color=Color(0xFF858590),fontSize=11.sp)
+                                Spacer(Modifier.height(12.dp))
+                                Button(onClick={episodeReload++},colors=ButtonDefaults.buttonColors(containerColor=colors.primary),shape=RoundedCornerShape(13.dp)){
+                                    Text("RETRY",color=Color.White,fontWeight=FontWeight.Bold)
+                                }
                             }
                         }
                     }
