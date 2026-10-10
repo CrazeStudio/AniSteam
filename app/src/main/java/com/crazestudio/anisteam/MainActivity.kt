@@ -61,6 +61,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Base64
 
 private const val SOURCE = "https://animesalt.cx"
@@ -1000,7 +1001,19 @@ private class AnimeSaltChromeClient(
     onEpisode:(Episode)->Unit
 ){
     val context=LocalContext.current
-    val activity=context as ComponentActivity
+    val activity=remember(context){context.findComponentActivity()}
+    if(activity==null){
+        Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
+            Column(horizontalAlignment=Alignment.CenterHorizontally,modifier=Modifier.padding(24.dp)){
+                Text("Player could not start",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("AniSteam could not access the current Android activity.",color=Color(0xFFB7B7C2),fontSize=12.sp)
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick=onBack){Text("BACK",color=colors.primary)}
+            }
+        }
+        return
+    }
     val chromeClient=remember(activity){
         AnimeSaltChromeClient(activity){ /* embedded player owns its playback UI */ }
     }
@@ -1263,6 +1276,12 @@ private class AnimeSaltChromeClient(
             }
         }
     }
+}
+
+private tailrec fun Context.findComponentActivity():ComponentActivity? = when(this){
+    is ComponentActivity -> this
+    is ContextWrapper -> baseContext.findComponentActivity()
+    else -> null
 }
 
 private fun formatPlayerTime(milliseconds:Long):String{
