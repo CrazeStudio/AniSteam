@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -163,217 +164,216 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         }
     }
 
+    var catalogueFilter by remember{mutableStateOf("ALL")}
     val featured=data.firstOrNull()
-    val discover=data.drop(1).take(12)
-    val trending=data.drop(13).take(12)
-    val fresh=data.drop(25).take(12)
-
+    val continueItems=continueWatching.take(8)
+    val filteredData=remember(data,catalogueFilter){
+        when(catalogueFilter){
+            "SERIES"->data.filter{it.kind!="movie"}
+            "MOVIES"->data.filter{it.kind=="movie"}
+            else->data
+        }
+    }
     LazyColumn(
-        Modifier.fillMaxSize().background(Color(0xFF07070B)),
-        contentPadding=PaddingValues(bottom=42.dp)
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF0A0A10),Color(0xFF08080C)))),
+        contentPadding=PaddingValues(bottom=34.dp)
     ){
         item{
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=18.dp),
-                verticalAlignment=Alignment.CenterVertically
-            ){
+            Row(Modifier.fillMaxWidth().padding(start=20.dp,end=18.dp,top=18.dp,bottom=15.dp),verticalAlignment=Alignment.CenterVertically){
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Color(0xFFFF8B48),Color(0xFFFF5A36)))),contentAlignment=Alignment.Center){
+                    Text("A",color=Color.White,fontSize=24.sp,fontWeight=FontWeight.Black)
+                }
+                Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)){
+                    Text("AniSteam",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black,letterSpacing=(-0.5).sp)
                     Row(verticalAlignment=Alignment.CenterVertically){
-                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(colors.primary),contentAlignment=Alignment.Center){
-                            Text("A",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Black)
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column{
-                            Text("ANISTEAM",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black,letterSpacing=1.5.sp)
-                            Text("YOUR ANIME. YOUR WAY.",color=Color(0xFF777780),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
-                        }
+                        Box(Modifier.size(5.dp).clip(RoundedCornerShape(50)).background(Color(0xFF4ADE80)))
+                        Spacer(Modifier.width(5.dp))
+                        Text("ANIMESALT CATALOGUE",color=Color(0xFF8D8D9B),fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.4.sp)
                     }
                 }
-                TextButton(onClick=onSources){
-                    Text("ANIMESALT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                Surface(onClick=onSources,shape=RoundedCornerShape(14.dp),color=Color(0xFF171720),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282832))){
+                    Text("SOURCE  ⌄",Modifier.padding(horizontal=12.dp,vertical=11.dp),color=Color(0xFFE5E5EC),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.6.sp)
                 }
             }
         }
-
         item{
-            Column(Modifier.padding(horizontal=18.dp)){
-                OutlinedTextField(
-                    value=q,
-                    onValueChange={q=it},
-                    modifier=Modifier.fillMaxWidth().height(58.dp),
-                    singleLine=true,
-                    shape=RoundedCornerShape(18.dp),
-                    keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
-                    keyboardActions=KeyboardActions(onSearch={submitSearch()}),
-                    colors=OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor=colors.primary,
-                        unfocusedBorderColor=Color(0xFF24242D),
-                        cursorColor=colors.primary,
-                        focusedContainerColor=Color(0xFF111117),
-                        unfocusedContainerColor=Color(0xFF111117)
-                    ),
-                    placeholder={Text("Search anime...",color=Color(0xFF666671),fontSize=14.sp)},
-                    trailingIcon={
-                        Row(verticalAlignment=Alignment.CenterVertically){
-                            if(q.isNotBlank()) TextButton(onClick={q=""}){
-                                Text("CLEAR",color=Color(0xFF777783),fontSize=9.sp,fontWeight=FontWeight.Bold)
-                            }
-                            TextButton(onClick={submitSearch}){
-                                Text("GO",color=colors.primary,fontSize=11.sp,fontWeight=FontWeight.ExtraBold)
-                            }
+            OutlinedTextField(
+                value=q,onValueChange={q=it},
+                modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).height(58.dp),
+                singleLine=true,shape=RoundedCornerShape(18.dp),
+                keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
+                keyboardActions=KeyboardActions(onSearch={submitSearch()}),
+                colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Color(0xFFFF8955),unfocusedBorderColor=Color(0xFF252530),cursorColor=colors.primary,focusedContainerColor=Color(0xFF13131B),unfocusedContainerColor=Color(0xFF111118)),
+                placeholder={Text("Find an anime or movie",color=Color(0xFF777783),fontSize=13.sp)},
+                leadingIcon={Text("⌕",modifier=Modifier.padding(start=8.dp),color=Color(0xFF9C9CA8),fontSize=25.sp)},
+                trailingIcon={
+                    Row(verticalAlignment=Alignment.CenterVertically){
+                        if(q.isNotBlank())TextButton(onClick={q="";if(submitted.isNotBlank())submitted=""}){Text("×",color=Color(0xFF9C9CA8),fontSize=22.sp)}
+                        Surface(onClick=submitSearch,shape=RoundedCornerShape(12.dp),color=colors.primary){
+                            Text("GO",Modifier.padding(horizontal=13.dp,vertical=10.dp),color=Color.White,fontSize=10.sp,fontWeight=FontWeight.Black)
                         }
+                        Spacer(Modifier.width(5.dp))
                     }
-                )
-            }
+                }
+            )
         }
-
         if(submitted.isBlank() && !loading && error==null && featured!=null){
             item{
                 Spacer(Modifier.height(18.dp))
-                Box(
-                    Modifier.fillMaxWidth().height(350.dp)
-                        .padding(horizontal=18.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .clickable{onOpen(featured.slug)}
-                ){
+                Box(Modifier.fillMaxWidth().padding(horizontal=18.dp).height(300.dp).clip(RoundedCornerShape(27.dp)).clickable{onOpen(featured.slug)}){
                     AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
-                    Box(
-                        Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent,Color(0xCC050509),Color(0xF5050509))
-                            )
-                        )
-                    )
-                    Column(
-                        Modifier.align(Alignment.BottomStart).padding(22.dp)
-                    ){
-                        Text("FEATURED",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=2.2.sp)
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x1106060A),Color(0x6606060A),Color(0xF508080D)))))
+                    Box(Modifier.align(Alignment.TopStart).padding(15.dp).clip(RoundedCornerShape(9.dp)).background(Color(0xCC171720)).padding(horizontal=10.dp,vertical=7.dp)){
+                        Row(verticalAlignment=Alignment.CenterVertically){
+                            Box(Modifier.size(5.dp).clip(RoundedCornerShape(50)).background(colors.primary))
+                            Spacer(Modifier.width(6.dp))
+                            Text("EDITOR'S PICK",color=Color.White,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.sp)
+                        }
+                    }
+                    Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(20.dp)){
+                        Text(if(featured.kind=="movie")"FEATURED MOVIE" else "FEATURED SERIES",color=Color(0xFFFFA16F),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.7.sp)
                         Spacer(Modifier.height(7.dp))
-                        Text(featured.title,color=Color.White,fontSize=31.sp,fontWeight=FontWeight.Black,maxLines=2,lineHeight=34.sp)
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            featured.type+"  •  "+featured.episodes+" episodes  •  ★ "+featured.score,
-                            color=Color(0xFFD0D0D7),fontSize=11.sp
-                        )
-                        Spacer(Modifier.height(13.dp))
-                        Row(
-                            Modifier.clip(RoundedCornerShape(12.dp)).background(colors.primary)
-                                .clickable{onOpen(featured.slug)}
-                                .padding(horizontal=18.dp,vertical=11.dp),
-                            verticalAlignment=Alignment.CenterVertically
-                        ){
-                            Text("▶",color=Color.White,fontSize=12.sp)
-                            Spacer(Modifier.width(7.dp))
-                            Text("WATCH NOW",color=Color.White,fontWeight=FontWeight.Bold,fontSize=11.sp,letterSpacing=1.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        if(submitted.isBlank() && continueWatching.isNotEmpty()){
-            item{
-                SectionHeader("CONTINUE WATCHING", "Keep watching")
-                LazyRow(
-                    contentPadding=PaddingValues(horizontal=18.dp),
-                    horizontalArrangement=Arrangement.spacedBy(12.dp)
-                ){
-                    items(continueWatching, key={it.url}){
-                        val watch=it
-                        val match=data.firstOrNull{anime->anime.slug==watch.animeSlug}
-                        Column(
-                            Modifier.width(190.dp).clip(RoundedCornerShape(17.dp))
-                                .background(Color(0xFF111117))
-                                .clickable{onOpen(watch.animeSlug)}
-                                .padding(10.dp)
-                        ){
-                            Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(12.dp))){
-                                if(match!=null){
-                                    AsyncImage(match.image,match.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
-                                    Box(Modifier.fillMaxSize().background(Color(0x66000000)))
-                                }else{
-                                    Box(Modifier.fillMaxSize().background(Color(0xFF1B1B23)))
-                                }
-                                Box(
-                                    Modifier.align(Alignment.Center).size(38.dp).clip(RoundedCornerShape(50))
-                                        .background(colors.primary),
-                                    contentAlignment=Alignment.Center
-                                ){Text("▶",color=Color.White,fontSize=12.sp)}
+                        Text(featured.title,color=Color.White,fontSize=27.sp,fontWeight=FontWeight.Black,maxLines=2,lineHeight=31.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(featured.type+"  •  "+featured.episodes+" episodes"+if(featured.score!="—")"  •  ★ "+featured.score else "",color=Color(0xFFD3D3DC),fontSize=11.sp,maxLines=1)
+                        Spacer(Modifier.height(14.dp))
+                        Surface(onClick={onOpen(featured.slug)},shape=RoundedCornerShape(13.dp),color=colors.primary){
+                            Row(Modifier.padding(horizontal=16.dp,vertical=11.dp),verticalAlignment=Alignment.CenterVertically){
+                                Text("▶",color=Color.White,fontSize=11.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Explore title",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.ExtraBold)
                             }
-                            Spacer(Modifier.height(9.dp))
-                            Text(match?.title ?: watch.title.ifBlank{"Anime"},color=Color.White,fontWeight=FontWeight.Bold,fontSize=13.sp,maxLines=1)
-                            Text("Episode "+watch.number,color=Color(0xFF858590),fontSize=11.sp)
                         }
                     }
                 }
             }
         }
-
-        if(submitted.isBlank() && discover.isNotEmpty()){
-            item{SectionHeader("EXPLORE","A few picks from AnimeSalt")}
-            item{AnimeRail(discover,onOpen)}
-            if(trending.isNotEmpty()){
-                item{SectionHeader("MORE TO DISCOVER","Keep exploring")}
-                item{AnimeRail(trending,onOpen)}
-            }
-            if(fresh.isNotEmpty()){
-                item{SectionHeader("MORE TITLES","More from the catalogue")}
-                item{AnimeRail(fresh,onOpen)}
-            }
-        }
-
-        item{
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=18.dp),
-                verticalAlignment=Alignment.CenterVertically
-            ){
-                Column(Modifier.weight(1f)){
-                    Text(
-                        if(submitted.isBlank())"ALL ANIME" else "SEARCH RESULTS",
-                        color=Color.White,fontSize=20.sp,fontWeight=FontWeight.ExtraBold
-                    )
-                    if(data.isNotEmpty()) Text("${data.size} titles loaded",color=Color(0xFF777783),fontSize=11.sp)
+        if(submitted.isBlank() && continueItems.isNotEmpty()){
+            item{
+                Row(Modifier.fillMaxWidth().padding(start=19.dp,end=18.dp,top=26.dp,bottom=12.dp),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("PICK UP WHERE YOU LEFT OFF",color=Color(0xFF8E8E9A),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.4.sp)
+                        Text("Continue watching",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.ExtraBold)
+                    }
+                    Text("RECENT",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.Black,letterSpacing=1.sp)
                 }
-                Spacer(Modifier.width(8.dp))
-                if(submitted.isNotBlank()){
-                    TextButton(onClick={q="";submitted=""}){
-                        Text("CLEAR",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                LazyRow(contentPadding=PaddingValues(horizontal=18.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                    items(continueItems,key={it.url}){watch->
+                        val match=data.firstOrNull{anime->anime.slug==watch.animeSlug}
+                        Surface(onClick={onOpen(watch.animeSlug)},shape=RoundedCornerShape(17.dp),color=Color(0xFF15151D),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF24242F)),modifier=Modifier.width(230.dp)){
+                            Row(Modifier.padding(10.dp),verticalAlignment=Alignment.CenterVertically){
+                                Box(Modifier.size(68.dp,78.dp).clip(RoundedCornerShape(12.dp))){
+                                    if(match!=null)AsyncImage(match.image,match.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop) else Box(Modifier.fillMaxSize().background(Color(0xFF24242D)))
+                                    Box(Modifier.fillMaxSize().background(Color(0x44000000)))
+                                    Box(Modifier.align(Alignment.Center).size(29.dp).clip(RoundedCornerShape(50)).background(colors.primary),contentAlignment=Alignment.Center){Text("▶",color=Color.White,fontSize=10.sp)}
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)){
+                                    Text(match?.title?:watch.title.ifBlank{"Anime"},color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold,maxLines=2)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("Episode "+watch.number,color=Color(0xFF9999A5),fontSize=10.sp)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("RESUME  →",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.7.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-
+        item{
+            Row(Modifier.fillMaxWidth().padding(start=19.dp,end=18.dp,top=27.dp,bottom=12.dp),verticalAlignment=Alignment.CenterVertically){
+                Column(Modifier.weight(1f)){
+                    Text(if(submitted.isBlank())"YOUR NEXT OBSESSION" else "SEARCH",color=Color(0xFF8E8E9A),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.4.sp)
+                    Text(if(submitted.isBlank())"Explore anime" else "Results",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Black)
+                }
+                if(data.isNotEmpty())Text(data.size.toString()+" loaded",color=Color(0xFF9C9CA8),fontSize=10.sp)
+            }
+        }
+        item{
+            Row(Modifier.fillMaxWidth().padding(horizontal=18.dp).padding(bottom=14.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically){
+                listOf("ALL","SERIES","MOVIES").forEach{filter->
+                    val selected=filter==catalogueFilter
+                    Surface(onClick={catalogueFilter=filter},shape=RoundedCornerShape(12.dp),color=if(selected)colors.primary else Color(0xFF15151D),border=androidx.compose.foundation.BorderStroke(1.dp,if(selected)Color(0xFFFF9A6C) else Color(0xFF282832))){
+                        Text(filter,Modifier.padding(horizontal=15.dp,vertical=9.dp),color=Color.White,fontSize=10.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.7.sp)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if(submitted.isNotBlank())TextButton(onClick={q="";submitted="";catalogueFilter="ALL"}){Text("CLEAR",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold)}
+            }
+        }
         when{
             loading->item{
-                Box(Modifier.fillMaxWidth().height(250.dp),contentAlignment=Alignment.Center){
+                Column(Modifier.fillMaxWidth().padding(vertical=45.dp),horizontalAlignment=Alignment.CenterHorizontally){
                     CircularProgressIndicator(color=colors.primary,strokeWidth=2.5.dp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Finding titles from AnimeSalt…",color=Color(0xFF888894),fontSize=11.sp)
                 }
             }
             error!=null->item{
-                Box(Modifier.fillMaxWidth().padding(30.dp),contentAlignment=Alignment.Center){
-                    Text(error!!,color=Color(0xFF9999A4))
+                Column(Modifier.fillMaxWidth().padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                    Text("Catalogue couldn't load",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(error!!,color=Color(0xFF9999A5),fontSize=11.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick={catalogReload++},shape=RoundedCornerShape(13.dp),colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("TRY AGAIN",fontWeight=FontWeight.Bold)}
                 }
             }
-            data.isEmpty()->item{
-                Box(Modifier.fillMaxWidth().height(220.dp),contentAlignment=Alignment.Center){
-                    Text("No anime found.",color=Color(0xFF777783))
-                }
-            }
-            else->{
-                items(data, key={it.kind+":"+it.slug}){anime->
-                    AnimeListCard(anime){onOpen(anime.slug)}
-                }
-                if(hasMore){
-                    item{
-                        Box(Modifier.fillMaxWidth().padding(20.dp),contentAlignment=Alignment.Center){
-                            if(loadingMore) CircularProgressIndicator(color=colors.primary,strokeWidth=2.dp)
-                            else Button(onClick={catalogPage+=1},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){
-                                Text("LOAD MORE",color=Color.White,fontWeight=FontWeight.Bold)
-                            }
-                        }
+            filteredData.isEmpty()->item{
+                Column(Modifier.fillMaxWidth().padding(vertical=42.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                    Text(if(submitted.isBlank())"Nothing here yet" else "No matching titles",color=Color.White,fontSize=17.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(if(submitted.isBlank())"Try another category." else "Try a shorter title or just the main anime name.",color=Color(0xFF888894),fontSize=11.sp)
+                    if(submitted.isNotBlank()){
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(onClick={q="";submitted=""}){Text("SHOW ALL TITLES",color=colors.primary,fontWeight=FontWeight.Bold)}
                     }
                 }
             }
+            else->{
+                items(filteredData.chunked(2),key={row->row.joinToString("|"){it.kind+":"+it.slug}}){row->
+                    Row(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                        AnimeGridCard(row[0],Modifier.weight(1f)){onOpen(row[0].slug)}
+                        if(row.size>1)AnimeGridCard(row[1],Modifier.weight(1f)){onOpen(row[1].slug)} else Spacer(Modifier.weight(1f))
+                    }
+                }
+                if(hasMore){
+                    item{
+                        Box(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=22.dp),contentAlignment=Alignment.Center){
+                            if(loadingMore)CircularProgressIndicator(color=colors.primary,strokeWidth=2.dp)
+                            else Button(onClick={catalogPage+=1},shape=RoundedCornerShape(15.dp),colors=ButtonDefaults.buttonColors(containerColor=Color(0xFF1A1A24)),modifier=Modifier.fillMaxWidth().height(50.dp)){Text("LOAD MORE TITLES",color=Color.White,fontWeight=FontWeight.ExtraBold,letterSpacing=0.8.sp)}
+                        }
+                    }
+                }else item{Box(Modifier.fillMaxWidth().padding(20.dp),contentAlignment=Alignment.Center){Text("You're all caught up.",color=Color(0xFF70707C),fontSize=10.sp)}}
+            }
+        }
+    }
+}
+
+
+@Composable private fun AnimeGridCard(anime:Anime,modifier:Modifier=Modifier,onClick:()->Unit){
+    var pressed by remember(anime.slug){mutableStateOf(false)}
+    val scale by animateFloatAsState(if(pressed)0.975f else 1f,animationSpec=tween(180),label="animeCardScale")
+    Column(
+        modifier.graphicsLayer{scaleX=scale;scaleY=scale}.clip(RoundedCornerShape(19.dp))
+            .background(Color(0xFF14141C)).clickable{pressed=true;onClick()}.padding(8.dp).animateContentSize()
+    ){
+        Box(Modifier.fillMaxWidth().height(174.dp).clip(RoundedCornerShape(13.dp))){
+            AsyncImage(anime.image,anime.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent,Color(0x8806060A)))))
+            Box(Modifier.align(Alignment.TopStart).padding(8.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xCC101016)).padding(horizontal=7.dp,vertical=5.dp)){
+                Text(if(anime.kind=="movie")"MOVIE" else "SERIES",color=Color.White,fontSize=8.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.7.sp)
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(31.dp).clip(RoundedCornerShape(50)).background(colors.primary),contentAlignment=Alignment.Center){Text("↗",color=Color.White,fontSize=15.sp,fontWeight=FontWeight.Bold)}
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(anime.title,color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold,maxLines=2,minLines=2,lineHeight=16.sp)
+        Spacer(Modifier.height(5.dp))
+        Row(verticalAlignment=Alignment.CenterVertically){
+            Text(anime.type,color=Color(0xFF9A9AA7),fontSize=9.sp,maxLines=1)
+            Spacer(Modifier.weight(1f))
+            if(anime.score.isNotBlank() && anime.score!="—")Text("★ "+anime.score,color=Color(0xFFFFC28F),fontSize=9.sp,fontWeight=FontWeight.Bold)
         }
     }
 }
@@ -788,30 +788,37 @@ private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
     val normalized=slug.trim('/')
     val prefix=normalized.substringBefore('/')
     val directPath=prefix in listOf("tv","series","movie","movies")
-    val directUrl=if(directPath) "$BASE_URL/$normalized/" else null
-    val seriesUrl=directUrl ?: "$BASE_URL/series/$normalized/"
-    val movieUrl=directUrl ?: "$BASE_URL/movies/$normalized/"
-    val seriesDoc=try{getHtml(seriesUrl)}catch(_:Exception){null}
-    val doc=if(seriesDoc?.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.isNotBlank()==true) seriesDoc else getHtml(movieUrl)
-    val kind=when {
-        prefix=="movie" || prefix=="movies" -> "movie"
-        prefix=="tv" || prefix=="series" -> "series"
-        doc===seriesDoc -> "series"
-        else -> "movie"
+    val candidates=if(directPath) listOf("$BASE_URL/$normalized/") else listOf(
+        "$BASE_URL/tv/$normalized/","$BASE_URL/series/$normalized/","$BASE_URL/movies/$normalized/","$BASE_URL/movie/$normalized/"
+    )
+    var chosenDoc:org.jsoup.nodes.Document?=null
+    var chosenUrl=""
+    var lastError:Exception?=null
+    for(url in candidates){
+        try{
+            val candidate=getHtml(url)
+            val title=candidate.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
+            if(title.isNotBlank()){
+                chosenDoc=candidate
+                chosenUrl=url
+                val hasEpisodes=candidate.select("a[href*=/episode/], [data-season][data-post], .season-btn[data-season]").isNotEmpty()
+                val moviePath=url.contains("/movie",ignoreCase=true) && !url.contains("/tv/",ignoreCase=true) && !url.contains("/series/",ignoreCase=true)
+                if(hasEpisodes || moviePath) break
+            }
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){lastError=e}
     }
+    val doc=chosenDoc ?: throw java.io.IOException("AnimeSalt could not find this title at /tv/, /series/ or /movies/."+(lastError?.message?.let{" $it"}?:""),lastError)
     val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
-    if(title.isBlank()) throw IllegalStateException("Anime not found")
+    if(title.isBlank()) throw IllegalStateException("Anime title was missing from its page.")
+    val isMovie=chosenUrl.contains("/movie",ignoreCase=true) && !chosenUrl.contains("/tv/",ignoreCase=true) && !chosenUrl.contains("/series/",ignoreCase=true)
     val description=doc.selectFirst(".description, .desc, [class*=description]")
     val overview=description?.selectFirst("p")?.text()?.trim().orEmpty()
-    val language=description?.select("p")?.firstOrNull { it.text().contains("Language:") }?.text()?.substringAfter("Language:")?.trim().orEmpty()
-    val quality=description?.select("p")?.firstOrNull { it.text().contains("Quality:") }?.text()?.substringAfter("Quality:")?.trim().orEmpty()
-    val genres=doc.select(".genres a, [class*=genre] a").map { it.text().trim() }.filter { it.isNotBlank() }
-    val year=doc.selectFirst(".year")?.text()?.trim().orEmpty()
     val seasonCount=Regex("(\\d+)\\s+Seasons?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
     val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
     val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
     val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,"Movie".takeIf{kind=="movie"}?:"Anime",overview,"animesalt",if(kind=="movie") 1 else seasonCount,slug,kind)
+    Anime(slug.hashCode(),title,poster,rating,episodes,if(isMovie)"Movie" else "Anime",overview,"animesalt",if(isMovie)1 else seasonCount,slug,if(isMovie)"movie" else "series")
 }
 
 private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
