@@ -485,8 +485,13 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             playingEpisode=ready
             saveContinueWatching(context,ready)
         }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){playerError="Could not load this episode player: "+(e.message?:"network error")}
-        finally{playerLoading=false}
+        catch(_:Exception){
+            // If the API cannot reach AnimeSalt, open the episode page directly in WebView.
+            val fallback=ep.copy(servers=listOf(PlayerServer("Episode page",ep.url,ep.url)))
+            playingEpisode=fallback
+            saveContinueWatching(context,fallback)
+            playerError=null
+        }finally{playerLoading=false}
     }
 
     val visibleEpisodes=remember(eps,episodeQuery){
@@ -788,43 +793,57 @@ private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
     if(q.isBlank())return@withContext fetchHome(page)
     if(page>1)return@withContext emptyList<Anime>()
     val encoded=URLEncoder.encode(q.trim().replace(Regex("\\s+")," "),"UTF-8")
-    val json=fetchApiJson("/search?q="+encoded)
-    jsonArrayObjects(json.optJSONArray("results")).mapNotNull{catalogAnime(it)}
-        .distinctBy{it.sourceId+":"+it.slug}
-}
-private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
+    val results=mutableListOf<Anime>()
     var lastError:Exception?=null
-    // Prefer the combined catalogue endpoint so a failure of one source does not
-    // make the entire home screen appear broken.
     try{
-        val json=fetchApiJson("/catalogue?page=$page")
-        val items=jsonArrayObjects(json.optJSONArray("results"))
-        val combined=items.mapNotNull{catalogAnime(it)}
-            .distinctBy{it.sourceId+":"+it.slug}
-        if(combined.isNotEmpty())return@withContext combined
-        lastError=java.io.IOException("The catalogue endpoint returned no titles.")
+        val json=fetchApiJson("/search?q="+encoded)
+        results+=jsonArrayObjects(json.optJSONArray("results")).mapNotNull{catalogAnime(it)}
     }catch(e:kotlinx.coroutines.CancellationException){throw e}
     catch(e:Exception){lastError=e}
-
-    // Compatibility fallback for older deployments and partial source outages.
-    val results=mutableListOf<Anime>()
-    for(endpoint in listOf("/api/series?page=$page","/api/movies?page=$page")){
-        try{
-            val json=fetchApiJson(endpoint)
-            val envelope=json.optJSONObject("results")
-            val items=envelope?.optJSONArray("results") ?: json.optJSONArray("results")
-            results+=jsonArrayObjects(items).mapNotNull{catalogAnime(it,"animesalt")}
-        }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){lastError=e}
-    }
+    // A normal on-device request can work when the API host's IP is blocked.
+    try{results+=fetchDirectAnime(q,1)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){lastError=e}
     val unique=results.distinctBy{it.sourceId+":"+it.slug}
-    if(unique.isEmpty() && page==1)throw java.io.IOException(
-        "Catalogue sources are temporarily unavailable. Tap TRY AGAIN in a moment.",
-        lastError
-    )
+    if(unique.isEmpty())throw java.io.IOException("Search sources are unavailable right now.",lastError)
     unique
 }
-
+private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
+    val results=mutableListOf<Anime>()
+    var lastError:Exception?=null
+    try{
+        val json=fetchApiJson("/catalogue?page="+page)
+        results+=jsonArrayObjects(json.optJSONArray("results")).mapNotNull{catalogAnime(it)}
+    }catch(e:kotlinx.coroutines.CancellationException){throw e}
+    catch(e:Exception){lastError=e}
+    if(results.isEmpty()){
+        for(endpoint in listOf("/api/series?page="+page,"/api/movies?page="+page)){
+            try{
+                val json=fetchApiJson(endpoint)
+                val envelope=json.optJSONObject("results")
+                val items=envelope?.optJSONArray("results") ?: json.optJSONArray("results")
+                results+=jsonArrayObjects(items).mapNotNull{catalogAnime(it,"animesalt")}
+            }catch(e:kotlinx.coroutines.CancellationException){throw e}
+            catch(e:Exception){lastError=e}
+        }
+    }
+    try{results+=fetchDirectAnime("",page)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){lastError=e}
+    val unique=results.distinctBy{it.sourceId+":"+it.slug}
+    if(unique.isEmpty() && page==1)throw java.io.IOException("Catalogue sources are temporarily unavailable. Tap TRY AGAIN in a moment.",lastError)
+    unique
+}
+private suspend fun fetchDirectAnime(query:String,page:Int)=withContext(Dispatchers.IO){
+    val encoded=URLEncoder.encode(query.trim().replace(Regex("\\s+")," "),"UTF-8")
+    val url=when{
+        query.isNotBlank() -> BASE_URL+"/?s="+encoded
+        page>1 -> BASE_URL+"/series/page/"+page+"/"
+        else -> BASE_URL+"/"
+    }
+    val parsed=extractSeries(getHtml(url))
+    if(query.isBlank())parsed
+    else{
+        val tokens=query.lowercase().split(Regex("\\s+")).filter{it.isNotBlank()}
+        parsed.filter{anime->tokens.count{anime.title.lowercase().contains(it)}>=maxOf(1,kotlin.math.ceil(tokens.size*0.6).toInt())}
+    }
+}
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
     val anchors=linkedMapOf<String,org.jsoup.nodes.Element>()
     doc.select("a[href], [data-href], [data-url]").forEach { element ->
