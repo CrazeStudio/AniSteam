@@ -69,13 +69,13 @@ private const val SOURCE = "https://animesalt.cx"
 data class Anime(val id:Int,val title:String,val image:String,val score:String,val episodes:String,val type:String,val synopsis:String="",val sourceId:String="animesalt",val seasons:Int=1,val slug:String="",val kind:String="series")
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class PlayerServer(val name:String,val url:String,val referer:String="")
-data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="")
+data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="",val displayNumber:String="",val season:Int=1)
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
 }
 
-private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"))
+private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"),AnimeSource("toonstream","ToonStream","https://toonstream.us"))
 
 private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
 
@@ -136,7 +136,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         error=null
         try{
             data=fetchAnime(submitted,1)
-            hasMore=data.isNotEmpty()
+            hasMore=submitted.isBlank() && data.isNotEmpty()
         }catch(e:kotlinx.coroutines.CancellationException){
             throw e
         }catch(e:Exception){
@@ -273,7 +273,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 Column(Modifier.weight(1f)){
                                     Text(match?.title?:watch.title.ifBlank{"Anime"},color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold,maxLines=2)
                                     Spacer(Modifier.height(6.dp))
-                                    Text("Episode "+watch.number,color=Color(0xFF9999A5),fontSize=10.sp)
+                                    Text("Episode "+watch.displayNumber.ifBlank{watch.number.toString()},color=Color(0xFF9999A5),fontSize=10.sp)
                                     Spacer(Modifier.height(8.dp))
                                     Text("RESUME  →",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.7.sp)
                                 }
@@ -515,7 +515,11 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     }
                 }
             }
-        }else SourceWebPlayer(playingEpisode!!, playingEpisode!!.servers.first(), eps, onBack={playingEpisode=null}, onEpisode={playingEpisode=it})
+        }else if(playingEpisode!!.servers.firstOrNull()?.url?.let{url->
+            val mediaPath=try{Uri.parse(url).path.orEmpty()}catch(_:Exception){url.substringBefore('?')}
+            listOf(".m3u8",".mp4",".mpd",".webm",".m4v",".mov").any{mediaPath.endsWith(it,true)}
+        }==true) SourcePlayer(playingEpisode!!,eps,onBack={playingEpisode=null},onEpisode={playingEpisode=it})
+        else SourceWebPlayer(playingEpisode!!, playingEpisode!!.servers.first(), eps, onBack={playingEpisode=null}, onEpisode={playingEpisode=it})
         return
     }
 
@@ -524,7 +528,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             onDismissRequest={chosen=null},
             shape=RoundedCornerShape(24.dp),
             containerColor=Color(0xFF14141B),
-            title={Text("Episode "+ep.number,color=Color.White,fontWeight=FontWeight.ExtraBold)},
+            title={Text("Episode "+ep.displayNumber.ifBlank{ep.number.toString()},color=Color.White,fontWeight=FontWeight.ExtraBold)},
             text={Text("Play this episode with AniSteam's native video player.",color=Color(0xFF9D9DA8))},
             confirmButton={TextButton(onClick={chosen=null;playingEpisode=ep}){Text("PLAY",color=colors.primary,fontWeight=FontWeight.Bold)}},
             dismissButton={TextButton(onClick={chosen=null}){Text("CANCEL",color=Color(0xFF858590))}}
@@ -637,7 +641,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 .clickable{chosen=ep}.padding(horizontal=13.dp,vertical=12.dp),
                             verticalAlignment=Alignment.CenterVertically
                         ){
-                            Text(ep.number.toString().padStart(2,'0'),color=colors.primary,fontSize=12.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.width(42.dp))
+                            Text(ep.displayNumber.ifBlank{ep.number.toString()}.take(8),color=colors.primary,fontSize=12.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.width(42.dp))
                             Column(Modifier.weight(1f)){
                                 Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=13.sp,maxLines=2)
                                 if(ep.aired.isNotBlank())Text(ep.aired,color=Color(0xFF70707B),fontSize=9.sp)
@@ -681,6 +685,8 @@ private fun saveContinueWatching(context:Context,ep:Episode){
     updated.forEach{
         json.put(JSONObject().apply{
             put("number",it.number)
+            put("displayNumber",it.displayNumber)
+            put("season",it.season)
             put("title",it.title)
             put("url",it.url)
             put("slug",it.animeSlug)
@@ -699,7 +705,9 @@ private fun loadContinueWatchingList(context:Context):List<Episode>{
                 o.optString("title","Episode"),
                 "",
                 o.optString("url",""),
-                animeSlug=o.optString("slug","")
+                animeSlug=o.optString("slug",""),
+                displayNumber=o.optString("displayNumber",""),
+                season=o.optInt("season",1).coerceAtLeast(1)
             )
         }.filter{it.animeSlug.isNotBlank() && it.url.isNotBlank()}
     }catch(_:Exception){emptyList()}
@@ -714,49 +722,88 @@ private const val BASE_URL = "https://animesalt.cx"
     }}},confirmButton={TextButton(onClick=onDismiss){Text("Done")}})
 }
 
-private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
-    if(q.isBlank()) return@withContext fetchHome(page)
-    val normalized=q.trim().replace(Regex("\\s+")," ")
-    val queries=buildList {
-        add(normalized)
-        normalized.split(" ").filter{it.length>=3}.sortedByDescending{it.length}
-            .forEach{term->if(none{it.equals(term,ignoreCase=true)}) add(term)}
-    }
-    val failures=mutableListOf<Exception>()
-    for(term in queries){
-        val encoded=URLEncoder.encode(term,"UTF-8")
-        val urls=listOf(
-            if(page==1) "$BASE_URL/?s=$encoded" else "$BASE_URL/page/$page/?s=$encoded",
-            if(page==1) "$BASE_URL/tv/?s=$encoded" else "$BASE_URL/tv/page/$page/?s=$encoded",
-            if(page==1) "$BASE_URL/movies/?s=$encoded" else "$BASE_URL/movies/page/$page/?s=$encoded"
-        )
-        val termResults=mutableListOf<Anime>()
-        for(url in urls){
-            try{termResults+=extractSeries(getHtml(url))}
-            catch(e:kotlinx.coroutines.CancellationException){throw e}
-            catch(e:Exception){failures+=e}
-        }
-        val unique=termResults.distinctBy{it.kind+":"+it.slug}
-        if(unique.isNotEmpty()) return@withContext unique
-    }
-    if(failures.isNotEmpty()) throw java.io.IOException("AnimeSalt search failed: "+(failures.first().message?:"network error"),failures.first())
-    emptyList()
-}
+private const val API_BASE_URL = "https://anisteam-api.vercel.app"
 
+private fun fetchApiJson(path:String):JSONObject{
+    val connection=(URL(API_BASE_URL+path).openConnection() as HttpURLConnection).apply{
+        requestMethod="GET"
+        connectTimeout=12_000
+        readTimeout=22_000
+        useCaches=true
+        setRequestProperty("Accept","application/json")
+        setRequestProperty("User-Agent","AniSteam-Android/1.0")
+    }
+    try{
+        val status=connection.responseCode
+        val stream=if(status in 200..299)connection.inputStream else connection.errorStream
+        val body=stream?.bufferedReader(Charsets.UTF_8)?.use{it.readText()}.orEmpty()
+        if(status !in 200..299) {
+            val message=try{
+                val error=JSONObject(body).opt("error")
+                if(error is JSONObject)error.optString("message").ifBlank{error.optString("code")} else error?.toString().orEmpty()
+            }catch(_:Exception){""}
+            throw java.io.IOException(message.ifBlank{"AniSteam API returned HTTP $status"})
+        }
+        val json=try{JSONObject(body)}catch(e:Exception){throw java.io.IOException("AniSteam API returned invalid JSON",e)}
+        if(!json.optBoolean("success",true)){
+            val error=json.opt("error")
+            val message=if(error is JSONObject)error.optString("message") else error?.toString().orEmpty()
+            throw java.io.IOException(message.ifBlank{"AniSteam API request failed"})
+        }
+        return json
+    }finally{connection.disconnect()}
+}
+private fun animeRouteKey(sourceId:String,link:String)=sourceId+"::"+link
+private fun unpackAnimeRouteKey(value:String):Pair<String,String>{
+    val split=value.indexOf("::")
+    if(split>0){
+        val source=value.substring(0,split).lowercase()
+        val link=value.substring(split+2)
+        if(link.startsWith("https://") || link.startsWith("http://"))return (if(source=="toonstream")"toonstream" else "animesalt") to link
+    }
+    if(value.startsWith("https://") || value.startsWith("http://")){
+        val host=Uri.parse(value).host.orEmpty()
+        val source=if(host.contains("toonstream",true)||host.contains("toon-stream",true))"toonstream" else "animesalt"
+        return source to value
+    }
+    val normalized=value.trim('/')
+    val link=if(normalized.startsWith("http://")||normalized.startsWith("https://"))normalized else "$BASE_URL/$normalized/"
+    return "animesalt" to link
+}
+private fun jsonArrayObjects(array:JSONArray?):List<JSONObject>{
+    if(array==null)return emptyList()
+    return (0 until array.length()).mapNotNull{array.optJSONObject(it)}
+}
+private fun catalogAnime(item:JSONObject,defaultSource:String="animesalt"):Anime?{
+    val title=item.optString("title").trim()
+    val link=item.optString("link").ifBlank{item.optString("url")}
+    if(title.isBlank()||link.isBlank())return null
+    val source=if(item.optString("source").contains("toonstream",true))"toonstream" else defaultSource
+    val kind=if(item.optString("type").equals("movie",true)||link.contains("/movie",true)||link.contains("/movies/",true))"movie" else "series"
+    val image=item.optString("image").ifBlank{item.optString("poster").ifBlank{item.optString("poster_image")}}
+    val key=animeRouteKey(source,link)
+    return Anime(key.hashCode(),title,image,"—","?",if(kind=="movie")"Movie" else "Anime","",source,1,key,kind)
+}
+private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
+    if(q.isBlank())return@withContext fetchHome(page)
+    if(page>1)return@withContext emptyList<Anime>()
+    val encoded=URLEncoder.encode(q.trim().replace(Regex("\\s+")," "),"UTF-8")
+    val json=fetchApiJson("/search?q="+encoded)
+    jsonArrayObjects(json.optJSONArray("results")).mapNotNull{catalogAnime(it)}
+        .distinctBy{it.sourceId+":"+it.slug}
+}
 private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
     val results=mutableListOf<Anime>()
-    val paths=listOf("/","/tv/","/movies/")
-    for(path in paths){
-        val url=when {
-            page==1 -> "$BASE_URL$path"
-            path=="/" -> "$BASE_URL/page/$page/"
-            else -> "$BASE_URL"+path.trimEnd('/')+"/page/$page/"
-        }
-        try{results+=extractSeries(getHtml(url))}
-        catch(e:kotlinx.coroutines.CancellationException){throw e}
+    for(endpoint in listOf("/api/series?page=$page","/api/movies?page=$page")){
+        try{
+            val json=fetchApiJson(endpoint)
+            val envelope=json.optJSONObject("results")
+            val items=envelope?.optJSONArray("results") ?: json.optJSONArray("results")
+            results+=jsonArrayObjects(items).mapNotNull{catalogAnime(it,"animesalt")}
+        }catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(_:Exception){}
     }
-    results.distinctBy{it.kind+":"+it.slug}
+    results.distinctBy{it.sourceId+":"+it.slug}
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
@@ -790,102 +837,62 @@ private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
 }
 
 private suspend fun fetchDetailsBySlug(slug:String)=withContext(Dispatchers.IO){
-    val normalized=slug.trim('/')
-    val prefix=normalized.substringBefore('/')
-    val directPath=prefix in listOf("tv","series","movie","movies")
-    val candidates=if(directPath) listOf("$BASE_URL/$normalized/") else listOf(
-        "$BASE_URL/tv/$normalized/","$BASE_URL/series/$normalized/","$BASE_URL/movies/$normalized/","$BASE_URL/movie/$normalized/"
+    val (sourceId,link)=unpackAnimeRouteKey(slug)
+    val data=fetchApiJson("/details?url="+URLEncoder.encode(link,"UTF-8"))
+    val title=data.optString("title").ifBlank{Uri.parse(link).lastPathSegment.orEmpty().replace('-',' ').replaceFirstChar{it.uppercase()}}
+    if(title.isBlank())throw java.io.IOException("The API did not return a title.")
+    val kind=if(data.optString("kind").equals("movie",true))"movie" else "series"
+    val episodes=data.optInt("episode_count",0)
+    Anime(
+        id=link.hashCode(),
+        title=title,
+        image=data.optString("poster"),
+        score=data.optString("score").ifBlank{"—"},
+        episodes=if(episodes>0)episodes.toString() else "?",
+        type=if(kind=="movie")"Movie" else "Anime",
+        synopsis=data.optString("overview"),
+        sourceId=sourceId,
+        seasons=data.optInt("seasons",1).coerceAtLeast(1),
+        slug=animeRouteKey(sourceId,link),
+        kind=kind
     )
-    var chosenDoc:org.jsoup.nodes.Document?=null
-    var chosenUrl=""
-    var lastError:Exception?=null
-    for(url in candidates){
-        try{
-            val candidate=getHtml(url)
-            val title=candidate.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
-            if(title.isNotBlank()){
-                chosenDoc=candidate
-                chosenUrl=url
-                val hasEpisodes=candidate.select("a[href*=/episode/], [data-season][data-post], .season-btn[data-season]").isNotEmpty()
-                val moviePath=url.contains("/movie",ignoreCase=true) && !url.contains("/tv/",ignoreCase=true) && !url.contains("/series/",ignoreCase=true)
-                if(hasEpisodes || moviePath) break
-            }
-        }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){lastError=e}
-    }
-    val doc=chosenDoc ?: throw java.io.IOException("AnimeSalt could not find this title at /tv/, /series/ or /movies/."+(lastError?.message?.let{" $it"}?:""),lastError)
-    val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
-    if(title.isBlank()) throw IllegalStateException("Anime title was missing from its page.")
-    val isMovie=chosenUrl.contains("/movie",ignoreCase=true) && !chosenUrl.contains("/tv/",ignoreCase=true) && !chosenUrl.contains("/series/",ignoreCase=true)
-    val description=doc.selectFirst(".description, .desc, [class*=description]")
-    val overview=description?.selectFirst("p")?.text()?.trim().orEmpty()
-    val seasonCount=Regex("(\\d+)\\s+Seasons?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
-    val episodes=Regex("(\\d+)\\s+Episodes?",RegexOption.IGNORE_CASE).find(doc.text())?.groupValues?.getOrNull(1) ?: "?"
-    val rating=doc.selectFirst(".vote-cn .vote")?.text()?.replace("TMDB","")?.trim().orEmpty()
-    val poster=posterFrom(doc.selectFirst(".post-thumbnail img, .poster img, img[src*=tmdb], img[data-src*=tmdb]"))
-    Anime(slug.hashCode(),title,poster,rating,episodes,if(isMovie)"Movie" else "Anime",overview,"animesalt",if(isMovie)1 else seasonCount,slug,if(isMovie)"movie" else "series")
 }
 
 private suspend fun fetchMovieEpisode(slug:String)=withContext(Dispatchers.IO){
-    val normalized=slug.trim('/')
-    val url=if(normalized.substringBefore('/') in listOf("movie","movies")) "$BASE_URL/$normalized/" else "$BASE_URL/movies/$normalized/"
-    val doc=getHtml(url)
-    val title=doc.selectFirst(".fg1 .entry-title, h1.entry-title, h1")?.text()?.trim().orEmpty()
-    if(title.isBlank()) return@withContext emptyList<Episode>()
-    listOf(Episode(1,title,"",url,animeSlug=slug))
+    val (sourceId,link)=unpackAnimeRouteKey(slug)
+    val data=fetchApiJson("/details?url="+URLEncoder.encode(link,"UTF-8"))
+    val title=data.optString("title").ifBlank{"Movie"}
+    listOf(Episode(1,title,"",link,animeSlug=animeRouteKey(sourceId,link),displayNumber="Movie",season=1))
 }
 
 private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Dispatchers.IO){
-    val normalized=slug.trim('/')
-    val prefix=normalized.substringBefore('/')
-    val candidates=if(prefix in listOf("tv","series")) listOf("$BASE_URL/$normalized/") else listOf("$BASE_URL/series/$normalized/","$BASE_URL/tv/$normalized/")
-    var seriesDoc:org.jsoup.nodes.Document?=null
-    var lastError:Exception?=null
-    for(url in candidates){
-        try{
-            val candidate=getHtml(url)
-            val hasTitle=candidate.selectFirst("h1.entry-title, .fg1 .entry-title, h1")?.text()?.isNotBlank()==true
-            val hasEpisodes=candidate.select("a[href*=/episode/]").isNotEmpty()
-            if(hasTitle || hasEpisodes){seriesDoc=candidate;if(hasEpisodes) break}
-        }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){lastError=e}
-    }
-    val doc=seriesDoc ?: throw java.io.IOException("Could not load AnimeSalt series page"+(lastError?.message?.let{": $it"}?:""),lastError)
-    val seasonButtons=doc.select("[data-season][data-post], [data-season][data-id], .season-btn[data-season]")
-        .mapNotNull { button ->
-            val n=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
-            val post=button.attr("data-post").ifBlank{button.attr("data-id")}.trim()
-            if(post.isBlank()) return@mapNotNull null
-            Triple(n,post,button.text().replace(Regex("\\s+")," ").trim())
-        }.distinctBy{it.first}.sortedBy{it.first}
-    val seasonsInLinks=doc.select("a[href*=/episode/]").mapNotNull { link ->
-        val href=link.absUrl("href").ifBlank{link.attr("href")}
-        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
-        Regex("(?:^|[-/])(\\d+)x\\d+(?:$|[-/])",RegexOption.IGNORE_CASE).find(path)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    }
-    val seasons=(seasonButtons.map{it.first}+seasonsInLinks).distinct().sorted().ifEmpty{listOf(1)}
-    fun seasonEpisodes(target:Int):List<Episode>{
-        val fromInitial=parseEpisodeList(doc,slug,target).distinctBy{it.url}
-        if(fromInitial.isNotEmpty()) return fromInitial
-        val button=seasonButtons.firstOrNull{it.first==target} ?: return emptyList()
-        try{
-            val ajax=postHtml("$BASE_URL/wp-admin/admin-ajax.php",
-                mapOf("action" to "action_select_season","season" to target.toString(),"post" to button.second),
-                "$BASE_URL/")
-            val parsed=parseEpisodeList(ajax,slug,target).distinctBy{it.url}
-            if(parsed.isNotEmpty()) return parsed
-        }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(e:Exception){lastError=e}
-        return emptyList()
-    }
-    val all=mutableListOf<Episode>()
-    var global=1
-    for(s in seasons){
-        seasonEpisodes(s).sortedBy{it.number}.forEach{ep->all+=ep.copy(number=global++)}
-    }
-    val unique=all.distinctBy{it.url}.sortedBy{it.number}
-    if(unique.isEmpty()) throw java.io.IOException("AnimeSalt page loaded, but no episode links were found. The site's episode markup may have changed.")
-    unique
+    val (sourceId,link)=unpackAnimeRouteKey(slug)
+    val data=fetchApiJson("/"+sourceId+"/episodes?url="+URLEncoder.encode(link,"UTF-8"))
+    val seen=linkedSetOf<String>()
+    jsonArrayObjects(data.optJSONArray("episodes")).mapNotNull{item->
+        val episodeUrl=item.optString("link").trim()
+        if(episodeUrl.isBlank()||!seen.add(episodeUrl))return@mapNotNull null
+        val rawEp=item.optString("episode").ifBlank{item.optString("epNum")}
+        val parsedPair=Regex("(\\d+)x(\\d+(?:\\.\\d+)?)",RegexOption.IGNORE_CASE).find(rawEp)
+        val episodeNumber=(parsedPair?.groupValues?.getOrNull(2)?.toDoubleOrNull()?.toInt()
+            ?:rawEp.toDoubleOrNull()?.toInt()
+            ?:item.optInt("episode",0)).coerceAtLeast(1)
+        val seasonNumber=(item.optString("season").toIntOrNull()
+            ?:parsedPair?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?:season).coerceAtLeast(1)
+        val label=item.optString("epNum").ifBlank{
+            if(seasonNumber>1)"${seasonNumber}x${episodeNumber}" else episodeNumber.toString()
+        }
+        Episode(
+            number=episodeNumber,
+            title=item.optString("title").ifBlank{"Episode $label"},
+            aired="",
+            url=episodeUrl,
+            animeSlug=animeRouteKey(sourceId,link),
+            displayNumber=label,
+            season=seasonNumber
+        )
+    }.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
 }
 
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
@@ -1020,7 +1027,7 @@ private class AnimeSaltChromeClient(
     val chromeClient=remember(activity){
         AnimeSaltChromeClient(activity){ /* embedded player owns its playback UI */ }
     }
-    val ordered=remember(episodes){episodes.sortedBy{it.number}}
+    val ordered=remember(episodes){episodes.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})}
     val currentIndex=ordered.indexOfFirst{it.url==episode.url}
     val previous=ordered.getOrNull(currentIndex-1)
     val next=ordered.getOrNull(currentIndex+1)
@@ -1336,51 +1343,24 @@ private fun formatPlayerTime(milliseconds:Long):String{
 }
 
 private fun fetchEmbeddedPlayer(episodeUrl:String):List<PlayerServer>{
-    val doc=getHtml(episodeUrl)
-    val pageUrl=doc.location().ifBlank{episodeUrl}
-    fun resolve(raw:String):String{
-        val cleaned=raw.trim().replace("&amp;","&")
-        return try{URL(URL(pageUrl),cleaned).toString()}catch(_:Exception){cleaned}
-    }
-    val candidates=linkedMapOf<String,PlayerServer>()
-    val nodes=doc.select(
-        "iframe[src], iframe[data-src], iframe[data-lazy-src], " +
-        "[data-embed], [data-iframe], a[href*='ravok.buzz/video/']"
-    )
-    fun add(raw:String,label:String){
-        if(raw.isBlank())return
-        val url=resolve(raw)
-        val parsed=try{Uri.parse(url)}catch(_:Exception){return}
-        if(parsed.scheme !in listOf("http","https") || parsed.host.isNullOrBlank())return
-        if(url==pageUrl || url==episodeUrl)return
-        candidates.putIfAbsent(url,PlayerServer(label,url,episodeUrl))
-    }
-    // Prefer the known embedded video host when it is present.
-    nodes.forEach{node->
-        val raw=when{
-            node.hasAttr("data-embed")->node.attr("data-embed")
-            node.hasAttr("data-iframe")->node.attr("data-iframe")
-            node.hasAttr("data-src")->node.attr("data-src")
-            node.hasAttr("data-lazy-src")->node.attr("data-lazy-src")
-            node.hasAttr("src")->node.attr("src")
-            else->node.attr("href")
-        }
-        if(raw.contains("ravok.buzz/video/",ignoreCase=true))add(raw,"Embedded player")
-    }
-    if(candidates.isEmpty()){
-        nodes.forEach{node->
-            val raw=when{
-                node.hasAttr("data-embed")->node.attr("data-embed")
-                node.hasAttr("data-iframe")->node.attr("data-iframe")
-                node.hasAttr("data-src")->node.attr("data-src")
-                node.hasAttr("data-lazy-src")->node.attr("data-lazy-src")
-                node.hasAttr("src")->node.attr("src")
-                else->node.attr("href")
-            }
-            add(raw,"Embedded player")
+    val json=fetchApiJson("/watch?url="+URLEncoder.encode(episodeUrl,"UTF-8"))
+    val ordered=mutableListOf<PlayerServer>()
+    val seen=linkedSetOf<String>()
+    fun append(array:JSONArray?,defaultName:String){
+        jsonArrayObjects(array).forEach{item->
+            val url=item.optString("link").ifBlank{item.optString("url")}.trim()
+            if(url.isBlank()||(!url.startsWith("https://")&&!url.startsWith("http://"))||!seen.add(url))return@forEach
+            val type=item.optString("type").lowercase()
+            val mediaPath=try{Uri.parse(url).path.orEmpty()}catch(_:Exception){url.substringBefore('?')}
+            val direct=type=="direct"||listOf(".m3u8",".mp4",".mpd",".webm",".m4v",".mov").any{mediaPath.endsWith(it,true)}
+            val label=item.optString("server").ifBlank{item.optString("name").ifBlank{if(direct)"Direct media" else defaultName+" "+(ordered.size+1)}}
+            ordered.add(PlayerServer(label,url,episodeUrl))
         }
     }
-    return candidates.values.take(4).toList()
+    append(json.optJSONArray("direct_streams"),"Direct")
+    append(json.optJSONArray("streams"),"Player")
+    append(json.optJSONArray("player_streams"),"Player")
+    return ordered
 }
 
 private fun fetchPlayableMedia(episodeUrl:String):List<PlayerServer>{
