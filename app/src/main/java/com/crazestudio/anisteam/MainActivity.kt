@@ -1179,7 +1179,7 @@ private suspend fun fetchDirectEpisodes(link:String,slug:String,declaredSeasonCo
                 catch(e:Exception){lastError=e;if(attempt==0)kotlinx.coroutines.delay(300)}
             }
         }
-        if(found.isEmpty() && !target?.postId.isNullOrBlank()){
+        if(!target?.postId.isNullOrBlank()){
             for(attempt in 0..1){
                 try{
                     val ajax=postHtml(BASE_URL+"/wp-admin/admin-ajax.php",
