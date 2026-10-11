@@ -952,17 +952,42 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
 }
 private suspend fun fetchDirectEpisodes(link:String,slug:String)=withContext(Dispatchers.IO){
     val doc=getHtml(link)
-    val episodes=mutableListOf<Episode>()
-    episodes+=parseEpisodeList(doc,slug,0)
-    val seasonUrls=doc.select(".season-btn[data-url],[data-season].season-btn[data-url]").mapNotNull{el->
-        val raw=el.attr("data-url").trim()
-        if(raw.isBlank())null else try{URL(URL(link),raw).toString()}catch(_:Exception){null}
-    }.distinct().take(20)
-    for(url in seasonUrls){
-        kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        try{episodes+=parseEpisodeList(getHtml(url),slug,0)}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(_:Exception){}
+    var lastError:Exception?=null
+    val seasonButtons=doc.select("[data-season][data-post], [data-season][data-id], .season-btn[data-season]")
+        .mapNotNull{button->
+            val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
+            val post=button.attr("data-post").ifBlank{button.attr("data-id")}.trim()
+            if(post.isBlank())return@mapNotNull null
+            Triple(number,post,button.text().replace(Regex("\\s+")," ").trim())
+        }.distinctBy{it.first}.sortedBy{it.first}
+    val seasonsInLinks=doc.select("a[href*=episode]").mapNotNull{anchor->
+        val href=anchor.absUrl("href").ifBlank{anchor.attr("href")}
+        val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
+        Regex("(?:^|[-/])(\\d+)x\\d+(?:$|[-/])",RegexOption.IGNORE_CASE)
+            .find(path)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
-    episodes.distinctBy{it.url}.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
+    val seasons=(seasonButtons.map{it.first}+seasonsInLinks).distinct().sorted().ifEmpty{listOf(1)}
+    val all=mutableListOf<Episode>()
+    for(targetSeason in seasons){
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        var found=parseEpisodeList(doc,slug,targetSeason).distinctBy{it.url}
+        if(found.isEmpty()){
+            val button=seasonButtons.firstOrNull{it.first==targetSeason}
+            if(button!=null){
+                try{
+                    val ajax=postHtml(BASE_URL+"/wp-admin/admin-ajax.php",
+                        mapOf("action" to "action_select_season","season" to targetSeason.toString(),"post" to button.second),
+                        BASE_URL+"/")
+                    found=parseEpisodeList(ajax,slug,targetSeason).distinctBy{it.url}
+                }catch(e:kotlinx.coroutines.CancellationException){throw e}
+                catch(e:Exception){lastError=e}
+            }
+        }
+        all+=found.sortedBy{it.number}
+    }
+    val unique=all.distinctBy{it.url}.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
+    if(unique.isEmpty() && lastError!=null)throw java.io.IOException("AnimeSalt season extraction failed: "+(lastError.message ?: "unknown error"),lastError)
+    unique
 }
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
     val candidates=doc.select("a[href]").mapNotNull { link ->
@@ -978,7 +1003,7 @@ private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int
             ?: Regex("(?:episode|ep)[-_/]?(\\d+)",RegexOption.IGNORE_CASE).find(tail)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: Regex("-(\\d+)$").find(tail)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: return@mapNotNull null
-        val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+        val urlSeason=seasonEpisode?.groupValues?.getOrNull(1)?.toIntOrNull() ?: season.coerceAtLeast(1)
         if(season>0 && seasonEpisode!=null && urlSeason!=season) return@mapNotNull null
 
         val container=link.closest("li,article,.item,.episode,.episode-item,.ep-item,[class*=episode]")
