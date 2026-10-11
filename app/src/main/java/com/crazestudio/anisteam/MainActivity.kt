@@ -792,8 +792,6 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         }
 
                     }
-
-                    }
                 }
                 if(detailsTab=="EPISODES"){
                 if(loading){
