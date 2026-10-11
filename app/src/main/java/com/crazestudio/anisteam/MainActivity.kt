@@ -1286,21 +1286,32 @@ private class AnimeSaltChromeClient(
     var durationMs by remember(server.url){mutableLongStateOf(0L)}
     var scrubbing by remember(server.url){mutableStateOf(false)}
     val exoPlayer=remember(server.url,server.referer){
-        val httpFactory=androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(mapOf("Referer" to server.referer.ifBlank{episode.url},"Origin" to (try{Uri.parse(server.referer.ifBlank{episode.url}).let{"${it.scheme}://${it.host}"}}catch(_:Exception){SOURCE})))
-        val dataSourceFactory=androidx.media3.datasource.DefaultDataSource.Factory(context,httpFactory)
-        androidx.media3.exoplayer.ExoPlayer.Builder(context)
-            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
-            .build()
+        runCatching{
+            val httpFactory=androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setUserAgent("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/121.0.0.0 Mobile Safari/537.36")
+                .setAllowCrossProtocolRedirects(true)
+                .setDefaultRequestProperties(mapOf("Referer" to server.referer.ifBlank{episode.url},"Origin" to (try{Uri.parse(server.referer.ifBlank{episode.url}).let{"${it.scheme}://${it.host}"}}catch(_:Exception){SOURCE})))
+            val dataSourceFactory=androidx.media3.datasource.DefaultDataSource.Factory(context,httpFactory)
+            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+                .build()
+        }.getOrElse{
+            // If custom HTTP headers are rejected by a device/Media3 version, retry
+            // with Media3's standard data-source configuration instead of crashing.
+            androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
+        }
     }
     LaunchedEffect(exoPlayer,server.url){
-        val uri=Uri.parse(server.url)
-        val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
-            if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true))setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
-        }.build()
-        exoPlayer.setMediaItem(item);exoPlayer.prepare();exoPlayer.playWhenReady=true
+        try{
+            val uri=Uri.parse(server.url)
+            val item=androidx.media3.common.MediaItem.Builder().setUri(uri).apply{
+                if(uri.path.orEmpty().endsWith(".m3u8",ignoreCase=true))setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+            }.build()
+            exoPlayer.setMediaItem(item);exoPlayer.prepare();exoPlayer.playWhenReady=true
+        }catch(e:Exception){
+            playbackError=e.message ?: "This video source could not be initialized."
+            buffering=false
+        }
     }
     DisposableEffect(exoPlayer){
         val listener=object:androidx.media3.common.Player.Listener{
