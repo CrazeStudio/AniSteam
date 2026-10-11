@@ -70,6 +70,7 @@ data class Anime(val id:Int,val title:String,val image:String,val score:String,v
 data class AnimeSource(val id:String,val name:String,val baseUrl:String,val enabled:Boolean=true)
 data class PlayerServer(val name:String,val url:String,val referer:String="")
 data class Episode(val number:Int,val title:String,val aired:String,val url:String="",val servers:List<PlayerServer> = emptyList(),val animeSlug:String="",val displayNumber:String="",val season:Int=1)
+private data class SeasonTarget(val number:Int,val postId:String,val title:String,val url:String)
 
 class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
@@ -588,12 +589,12 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
         }finally{playerLoading=false}
     }
 
-    val availableSeasons=remember(eps){eps.map{it.season.coerceAtLeast(1)}.distinct().sorted()}
+    val availableSeasons=remember(eps,anime){ val declared=(anime?.seasons ?: 1).coerceIn(1,30); (1..maxOf(declared,eps.maxOfOrNull{it.season} ?: 1)).toList() }
     LaunchedEffect(availableSeasons){
         if(availableSeasons.isNotEmpty() && selectedSeason !in availableSeasons) selectedSeason=availableSeasons.first()
     }
     val visibleEpisodes=remember(eps,episodeQuery,selectedSeason){
-        val seasonEpisodes=if(eps.any{it.season==selectedSeason})eps.filter{it.season==selectedSeason}else eps
+        val seasonEpisodes=eps.filter{it.season==selectedSeason}
         val term=episodeQuery.trim()
         if(term.isBlank()) seasonEpisodes else seasonEpisodes.filter {
             it.displayNumber.contains(term,true) || it.number.toString().contains(term,true) || it.title.contains(term,true)
@@ -829,8 +830,12 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
                     }
                     if(visibleEpisodes.isEmpty() && eps.isNotEmpty()){
                         item{
-                            Box(Modifier.fillMaxWidth().padding(24.dp),contentAlignment=Alignment.Center){
-                                Text("No episodes match this search.",color=Color(0xFF858590),fontSize=12.sp)
+                            Column(Modifier.fillMaxWidth().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                                Text(if(episodeQuery.isBlank())"No episodes loaded for Season $selectedSeason" else "No episodes match this search.",color=Color(0xFF858590),fontSize=12.sp)
+                                Spacer(Modifier.height(10.dp))
+                                Button(onClick={if(episodeQuery.isNotBlank())episodeQuery="" else episodeReload++},colors=ButtonDefaults.buttonColors(containerColor=colors.primary),shape=RoundedCornerShape(13.dp)){
+                                    Text(if(episodeQuery.isNotBlank())"CLEAR SEARCH" else "RETRY SEASON",color=Color.White,fontWeight=FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -1115,7 +1120,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     }catch(e:kotlinx.coroutines.CancellationException){throw e}
     catch(e:Exception){lastError=e}
     if(sourceId=="animesalt"){
-        try{results+=fetchDirectEpisodes(link,animeRouteKey(sourceId,link))}
+        try{results+=fetchDirectEpisodes(link,animeRouteKey(sourceId,link),season)}
         catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){lastError=e}
     }
@@ -1123,55 +1128,84 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
     if(unique.isEmpty() && lastError!=null)throw java.io.IOException("Could not load episodes from API or AnimeSalt directly.",lastError)
     unique
 }
-private suspend fun fetchDirectEpisodes(link:String,slug:String)=withContext(Dispatchers.IO){
+private suspend fun fetchDirectEpisodes(link:String,slug:String,declaredSeasonCount:Int=1)=withContext(Dispatchers.IO){
     val doc=getHtml(link)
     var lastError:Exception?=null
-    val seasonButtons=doc.select("[data-season][data-post], [data-season][data-id], .season-btn[data-season]")
-        .mapNotNull{button->
-            val number=button.attr("data-season").toIntOrNull() ?: return@mapNotNull null
-            val post=button.attr("data-post").ifBlank{button.attr("data-id")}.trim()
-            if(post.isBlank())return@mapNotNull null
-            Triple(number,post,button.text().replace(Regex("\\s+")," ").trim())
-        }.distinctBy{it.first}.sortedBy{it.first}
-    val seasonsInLinks=doc.select("a[href*=episode]").mapNotNull{anchor->
-        val href=anchor.absUrl("href").ifBlank{anchor.attr("href")}
+    val rawTargets=doc.select(".season-btn, [data-season], [data-season-id], [class*=season] [data-url], [class*=season] a[href]")
+        .mapNotNull{element->
+            val label=element.text().replace(Regex("\\s+")," ").trim()
+            val rawNumber=element.attr("data-season").ifBlank{element.attr("data-season-id")}
+                .ifBlank{Regex("(?:season\\s*|\\bS)(\\d+)\\b",RegexOption.IGNORE_CASE).find(label)?.groupValues?.getOrNull(1).orEmpty()}
+            val number=rawNumber.toIntOrNull() ?: return@mapNotNull null
+            val postId=element.attr("data-post").ifBlank{element.attr("data-post-id")}.ifBlank{element.attr("data-id")}.trim()
+            val rawUrl=element.attr("data-url").ifBlank{element.attr("href")}.trim()
+            val targetUrl=if(rawUrl.isBlank() || rawUrl.startsWith("#") || rawUrl.startsWith("javascript:",true)) "" else try{
+                java.net.URI(link).resolve(rawUrl).toString()
+            }catch(_:Exception){""}
+            val host=try{Uri.parse(targetUrl).host.orEmpty().lowercase()}catch(_:Exception){""}
+            val safeUrl=if(host.contains("animesalt.") && targetUrl!=link)targetUrl else ""
+            SeasonTarget(number,postId,label,safeUrl)
+        }
+    val seasonTargets=rawTargets.groupBy{it.number}.values.mapNotNull{group->
+        group.maxByOrNull{(if(it.url.isNotBlank())2 else 0)+(if(it.postId.isNotBlank())1 else 0)}
+    }.sortedBy{it.number}
+    val seasonsInLinks=doc.select("a[href], a[data-href], a[data-url]").mapNotNull{anchor->
+        val raw=anchor.attr("href").ifBlank{anchor.attr("data-href")}.ifBlank{anchor.attr("data-url")}
+        val href=try{java.net.URI(link).resolve(raw).toString()}catch(_:Exception){raw}
         val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
         Regex("(?:^|[-/])(\\d+)x\\d+(?:$|[-/])",RegexOption.IGNORE_CASE)
             .find(path)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
-    val seasons=(seasonButtons.map{it.first}+seasonsInLinks).distinct().sorted().ifEmpty{listOf(1)}
+    val seasonNumbers=((1..declaredSeasonCount.coerceIn(1,30)).toList()+seasonTargets.map{it.number}+seasonsInLinks)
+        .filter{it>0}.distinct().sorted()
     val all=mutableListOf<Episode>()
-    for(targetSeason in seasons){
+    for(targetSeason in seasonNumbers){
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        // The source page only renders one season's links at a time. If episode
-        // URLs do not encode their season, do not mistake the first season for every season.
+        val target=seasonTargets.firstOrNull{it.number==targetSeason}
         var found=if(targetSeason==1 || seasonsInLinks.contains(targetSeason))
             parseEpisodeList(doc,slug,targetSeason).distinctBy{it.url}
         else emptyList()
-        if(found.isEmpty()){
-            val button=seasonButtons.firstOrNull{it.first==targetSeason}
-            if(button!=null){
+        if(found.isNotEmpty() && target?.url.isNullOrBlank() && target?.postId.isNullOrBlank()){
+            all+=found
+            continue
+        }
+        if(target?.url?.isNotBlank()==true){
+            for(attempt in 0..1){
                 try{
-                    val ajax=postHtml(BASE_URL+"/wp-admin/admin-ajax.php",
-                        mapOf("action" to "action_select_season","season" to targetSeason.toString(),"post" to button.second),
-                        BASE_URL+"/")
-                    found=parseEpisodeList(ajax,slug,targetSeason).distinctBy{it.url}
+                    val seasonHtml=getHtml(target.url)
+                    found+=parseEpisodeList(seasonHtml,slug,targetSeason)
+                    break
                 }catch(e:kotlinx.coroutines.CancellationException){throw e}
-                catch(e:Exception){lastError=e}
+                catch(e:Exception){lastError=e;if(attempt==0)kotlinx.coroutines.delay(300)}
             }
         }
-        all+=found.sortedBy{it.number}
+        if(found.isEmpty() && !target?.postId.isNullOrBlank()){
+            for(attempt in 0..1){
+                try{
+                    val ajax=postHtml(BASE_URL+"/wp-admin/admin-ajax.php",
+                        mapOf("action" to "action_select_season","season" to targetSeason.toString(),"post" to target!!.postId),
+                        link)
+                    found+=parseEpisodeList(ajax,slug,targetSeason)
+                    if(found.isNotEmpty())break
+                }catch(e:kotlinx.coroutines.CancellationException){throw e}
+                catch(e:Exception){lastError=e;if(attempt==0)kotlinx.coroutines.delay(300)}
+            }
+        }
+        all+=found.distinctBy{it.url}.sortedBy{it.number}
     }
-    val unique=all.distinctBy{it.url}.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
+    val unique=all.groupBy{it.url}.mapNotNull{(_,items)->
+        items.maxByOrNull{(if(it.displayNumber.contains("x"))2 else 0)+(if(it.title.isNotBlank())1 else 0)}
+    }.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
     if(unique.isEmpty() && lastError!=null)throw java.io.IOException("AnimeSalt season extraction failed: "+(lastError.message ?: "unknown error"),lastError)
     unique
 }
 private fun parseEpisodeList(doc:org.jsoup.nodes.Document,slug:String,season:Int,episodeOffset:Int=0):List<Episode>{
-    val candidates=doc.select("a[href]").mapNotNull { link ->
-        val href=link.absUrl("href").ifBlank{link.attr("href")}.trim()
+    val candidates=doc.select("a[href], a[data-href], a[data-url]").mapNotNull { link ->
+        val rawHref=link.attr("href").ifBlank{link.attr("data-href")}.ifBlank{link.attr("data-url")}.trim()
+        val href=try{java.net.URI(link.baseUri().ifBlank{BASE_URL}).resolve(rawHref).toString()}catch(_:Exception){link.absUrl("href").ifBlank{rawHref}}
         if(href.isBlank()) return@mapNotNull null
         val path=try{Uri.parse(href).path.orEmpty()}catch(_:Exception){href}
-        if(!path.contains("/episode/",ignoreCase=true)) return@mapNotNull null
+        if(!Regex("/episodes?/").containsMatchIn(path)) return@mapNotNull null
         val tail=path.substringAfter("/episode/").trim('/')
         if(tail.isBlank()) return@mapNotNull null
 
