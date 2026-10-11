@@ -1357,7 +1357,7 @@ private fun fetchEmbeddedPlayer(episodeUrl:String):List<PlayerServer>{
             val mediaPath=try{Uri.parse(url).path.orEmpty()}catch(_:Exception){url.substringBefore('?')}
             val direct=type=="direct"||listOf(".m3u8",".mp4",".mpd",".webm",".m4v",".mov").any{mediaPath.endsWith(it,true)}
             val label=item.optString("server").ifBlank{item.optString("name").ifBlank{if(direct)"Direct media" else defaultName+" "+(ordered.size+1)}}
-            ordered.add(PlayerServer(label,url,episodeUrl))
+            ordered.add(PlayerServer(label,url,item.optString("via").ifBlank{episodeUrl}))
         }
     }
     append(json.optJSONArray("direct_streams"),"Direct")
