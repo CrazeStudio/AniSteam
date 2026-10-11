@@ -116,6 +116,7 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
     var q by remember{mutableStateOf("")}
     var submitted by remember{mutableStateOf("")}
     var showLibrary by remember{mutableStateOf(false)}
+    var showSearch by remember{mutableStateOf(false)}
     val context=LocalContext.current
     var data by remember{mutableStateOf<List<Anime>>(emptyList())}
     val continueWatching=remember{loadContinueWatchingList(context)}
@@ -196,12 +197,14 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
                         Text("ANIME, ALL IN ONE PLACE",color=Color(0xFF8D8D9B),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=0.8.sp,maxLines=1)
                     }
                 }
-                Surface(onClick=onSources,shape=RoundedCornerShape(14.dp),color=Color(0xFF171720),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282832))){
-                    Text("SOURCES  ⌄",Modifier.padding(horizontal=12.dp,vertical=11.dp),color=Color(0xFFE5E5EC),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.4.sp)
+                Surface(onClick={showSearch=!showSearch},shape=RoundedCornerShape(14.dp),color=Color(0xFF171720),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282832))){
+                    Box(Modifier.size(40.dp),contentAlignment=Alignment.Center){
+                        Text("⌕",color=Color(0xFFE5E5EC),fontSize=25.sp)
+                    }
                 }
             }
         }
-        item{
+        if(showSearch || submitted.isNotBlank()) item{
             OutlinedTextField(
                 value=q,onValueChange={q=it},
                 modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).height(58.dp),
@@ -225,7 +228,7 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
         if(submitted.isBlank() && !loading && error==null && featured!=null){
             item{
                 Spacer(Modifier.height(18.dp))
-                Box(Modifier.fillMaxWidth().padding(horizontal=18.dp).height(300.dp).clip(RoundedCornerShape(27.dp)).clickable{onOpen(featured.slug)}){
+                Box(Modifier.fillMaxWidth().padding(horizontal=18.dp).height(242.dp).clip(RoundedCornerShape(20.dp)).clickable{onOpen(featured.slug)}){
                     AsyncImage(featured.image,featured.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x1106060A),Color(0x6606060A),Color(0xF508080D)))))
                     Box(Modifier.align(Alignment.TopStart).padding(15.dp).clip(RoundedCornerShape(9.dp)).background(Color(0xCC171720)).padding(horizontal=10.dp,vertical=7.dp)){
@@ -248,6 +251,23 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Explore title",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.ExtraBold)
                             }
+                        }
+                    }
+                }
+            }
+        }
+        if(submitted.isBlank() && !loading && error==null) item{
+            Column(Modifier.fillMaxWidth().padding(top=18.dp)){
+                Text("Browse genres",Modifier.padding(start=20.dp,bottom=12.dp),color=Color.White,fontSize=18.sp,fontWeight=FontWeight.ExtraBold)
+                LazyRow(contentPadding=PaddingValues(horizontal=20.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    items(listOf("Action","Adventure","Fantasy","Drama")){genre->
+                        Surface(
+                            onClick={q=genre;submitted=genre;catalogueFilter="ALL";catalogPage=1;showSearch=true},
+                            shape=RoundedCornerShape(16.dp),
+                            color=Color(0xFF16181F),
+                            border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282832))
+                        ){
+                            Text(genre,Modifier.padding(horizontal=14.dp,vertical=9.dp),color=Color(0xFFF5F6FA),fontSize=11.sp,fontWeight=FontWeight.SemiBold)
                         }
                     }
                 }
@@ -284,6 +304,18 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
                         }
                     }
                 }
+            }
+        }
+        if(submitted.isBlank() && data.size>1) item{
+            Column(Modifier.fillMaxWidth().padding(top=22.dp)){
+                Row(Modifier.fillMaxWidth().padding(start=19.dp,end=18.dp,bottom=12.dp),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("TRENDING NOW",color=Color(0xFF8E8E9A),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.3.sp)
+                        Text("Popular this week",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.ExtraBold)
+                    }
+                    Text("TOP PICKS",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.Black,letterSpacing=0.8.sp)
+                }
+                AnimeRail(data.drop(1).take(6),onOpen)
             }
         }
         item{
@@ -357,7 +389,7 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
         modifier=Modifier.align(Alignment.BottomCenter),
         active="HOME",
         onHome={q="";submitted="";catalogueFilter="ALL"},
-        onSearch={if(q.isBlank())q=submitted;submitted=""},
+        onSearch={showSearch=true;if(q.isBlank())q=submitted;submitted=""},
         onLibrary={showLibrary=true},
         onProfile=onSources
     )
@@ -389,7 +421,7 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
             horizontalArrangement=Arrangement.spacedBy(4.dp),
             verticalAlignment=Alignment.CenterVertically
         ){
-            listOf(Triple("HOME","⌂",onHome),Triple("SEARCH","⌕",onSearch),Triple("LIBRARY","▣",onLibrary),Triple("SOURCES","●",onProfile)).forEach{item->
+            listOf(Triple("HOME","⌂",onHome),Triple("SEARCH","⌕",onSearch),Triple("LIBRARY","▣",onLibrary),Triple("PROFILE","●",onProfile)).forEach{item->
                 val selected=active==item.first
                 Column(
                     Modifier.weight(1f).clip(RoundedCornerShape(13.dp))
