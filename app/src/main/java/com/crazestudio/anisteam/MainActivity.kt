@@ -794,6 +794,7 @@ private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
 }
 private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
     val results=mutableListOf<Anime>()
+    var lastError:Exception?=null
     for(endpoint in listOf("/api/series?page=$page","/api/movies?page=$page")){
         try{
             val json=fetchApiJson(endpoint)
@@ -801,9 +802,11 @@ private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
             val items=envelope?.optJSONArray("results") ?: json.optJSONArray("results")
             results+=jsonArrayObjects(items).mapNotNull{catalogAnime(it,"animesalt")}
         }catch(e:kotlinx.coroutines.CancellationException){throw e}
-        catch(_:Exception){}
+        catch(e:Exception){lastError=e}
     }
-    results.distinctBy{it.sourceId+":"+it.slug}
+    val unique=results.distinctBy{it.sourceId+":"+it.slug}
+    if(unique.isEmpty() && page==1)throw java.io.IOException("AniSteam API returned no catalogue titles. Please retry in a moment.",lastError)
+    unique
 }
 
 private fun extractSeries(doc:org.jsoup.nodes.Document):List<Anime>{
