@@ -1191,7 +1191,19 @@ private class AnimeSaltChromeClient(
     episode:Episode, episodes:List<Episode>, onBack:()->Unit, onEpisode:(Episode)->Unit
 ){
     val context=LocalContext.current
-    val activity=context as ComponentActivity
+    val activity=remember(context){context.findComponentActivity()}
+    if(activity==null){
+        Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp),contentAlignment=Alignment.Center){
+            Column(horizontalAlignment=Alignment.CenterHorizontally){
+                Text("Player could not start",color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("AniSteam could not access the current Android activity.",color=Color(0xFFB7B7C2),fontSize=12.sp)
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick=onBack){Text("BACK",color=colors.primary)}
+            }
+        }
+        return
+    }
     val server=remember(episode.url,episode.servers){episode.servers.firstOrNull()}
     if(server==null){
         Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
