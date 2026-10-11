@@ -1458,6 +1458,9 @@ private class AnimeSaltChromeClient(
         return
     }
     val server=remember(episode.url,episode.servers){episode.servers.firstOrNull()}
+    val orderedEpisodes=remember(episodes){episodes.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})}
+    val currentEpisodeIndex=orderedEpisodes.indexOfFirst{it.url==episode.url}
+    val nextEpisode=orderedEpisodes.getOrNull(currentEpisodeIndex+1)
     if(server==null){
         Box(Modifier.fillMaxSize().background(Color.Black),contentAlignment=Alignment.Center){
             Text("No playable media link was found.",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.SemiBold)
@@ -1567,58 +1570,132 @@ private class AnimeSaltChromeClient(
         }
     }
     BackHandler{if(fullscreen)fullscreen=false else onBack()}
-    Box(Modifier.fillMaxSize().background(Color.Black).clickable{controlsVisible=!controlsVisible}){
-        AndroidView(
-            factory={ctx->androidx.media3.ui.PlayerView(ctx).apply{
-                useController=false
-                this.player=exoPlayer
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
-                resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-            }},
-            update={view->if(view.player!==exoPlayer)view.player=exoPlayer},
-            modifier=Modifier.fillMaxSize()
-        )
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000),Color.Transparent,Color(0xCC000000)))))
-        if(buffering && playbackError==null)CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
-        if(playbackError!=null){
-            Column(Modifier.align(Alignment.Center).padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                Text("Can't play this source",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold)
-                Spacer(Modifier.height(8.dp));Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
-                Spacer(Modifier.height(16.dp))
-                Button(onClick={playbackError=null;exoPlayer.prepare();exoPlayer.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("RETRY",fontWeight=FontWeight.Bold)}
-            }
-        }
-        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.TopCenter)){
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
-                Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}}
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)){
-                    Text("ANISTEAM PLAYER",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
-                    Text(episode.title.ifBlank{"Episode "+episode.number},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
+    Column(Modifier.fillMaxSize().background(Color(0xFF0B0D12))) {
+        Box(
+            Modifier.fillMaxWidth()
+                .then(if(fullscreen) Modifier.weight(1f) else Modifier.aspectRatio(16f/9f))
+                .background(Color.Black)
+                .clickable { controlsVisible=!controlsVisible }
+        ){
+            AndroidView(
+                factory={ctx->androidx.media3.ui.PlayerView(ctx).apply{
+                    useController=false
+                    this.player=exoPlayer
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
+                    resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }},
+                update={view->if(view.player!==exoPlayer)view.player=exoPlayer},
+                modifier=Modifier.fillMaxSize()
+            )
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000),Color.Transparent,Color(0xCC000000)))))
+            if(buffering && playbackError==null)CircularProgressIndicator(Modifier.align(Alignment.Center).size(42.dp),color=colors.primary,strokeWidth=3.dp)
+            if(playbackError!=null){
+                Column(Modifier.align(Alignment.Center).padding(28.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                    Text("Can't play this source",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp));Text(playbackError!!,color=Color(0xFFB7B7C2),fontSize=12.sp)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick={playbackError=null;exoPlayer.prepare();exoPlayer.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("RETRY",fontWeight=FontWeight.Bold)}
                 }
-                Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}}
+            }
+            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.TopCenter)){
+                Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
+                    Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}}
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)){
+                        Text("ANISTEAM PLAYER",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.8.sp)
+                        Text(episode.title.ifBlank{"Episode "+episode.number},color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                    }
+                    Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}}
+                }
+            }
+            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(160)),exit=fadeOut(tween(200)),modifier=Modifier.align(Alignment.Center)){
+                Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
+                    Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
+                    Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause()else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
+                    Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
+                }
+            }
+            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.BottomCenter)){
+                Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=10.dp)){
+                    Slider(value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f)else 0f,
+                        onValueChange={fraction->scrubbing=true;positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)},
+                        onValueChangeFinished={exoPlayer.seekTo(positionMs);scrubbing=false},
+                        colors=SliderDefaults.colors(thumbColor=colors.primary,activeTrackColor=colors.primary,inactiveTrackColor=Color(0x66777780)),
+                        modifier=Modifier.fillMaxWidth().height(24.dp))
+                    Row(verticalAlignment=Alignment.CenterVertically){
+                        Text(formatPlayerTime(positionMs),color=Color.White,fontSize=10.sp,fontWeight=FontWeight.SemiBold)
+                        Text(" / ",color=Color(0xFF888892),fontSize=10.sp)
+                        Text(formatPlayerTime(durationMs),color=Color(0xFFB6B6C0),fontSize=10.sp)
+                        Spacer(Modifier.weight(1f));Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                    }
+                }
             }
         }
-        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(160)),exit=fadeOut(tween(200)),modifier=Modifier.align(Alignment.Center)){
-            Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
-                Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
-                Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause()else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
-                Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
-            }
-        }
-        AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.BottomCenter)){
-            Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=16.dp)){
-                Slider(value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f)else 0f,
-                    onValueChange={fraction->scrubbing=true;positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)},
-                    onValueChangeFinished={exoPlayer.seekTo(positionMs);scrubbing=false},
-                    colors=SliderDefaults.colors(thumbColor=colors.primary,activeTrackColor=colors.primary,inactiveTrackColor=Color(0x66777780)),
-                    modifier=Modifier.fillMaxWidth().height(28.dp))
-                Row(verticalAlignment=Alignment.CenterVertically){
-                    Text(formatPlayerTime(positionMs),color=Color.White,fontSize=11.sp,fontWeight=FontWeight.SemiBold)
-                    Text(" / ",color=Color(0xFF888892),fontSize=11.sp)
-                    Text(formatPlayerTime(durationMs),color=Color(0xFFB6B6C0),fontSize=11.sp)
-                    Spacer(Modifier.weight(1f));Text("AniSteam",color=Color(0xFFB6B6C0),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+        if(!fullscreen){
+            LazyColumn(
+                Modifier.fillMaxWidth().weight(1f),
+                contentPadding=PaddingValues(start=18.dp,end=18.dp,top=17.dp,bottom=24.dp),
+                verticalArrangement=Arrangement.spacedBy(12.dp)
+            ){
+                item{
+                    Text("NOW PLAYING",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.6.sp)
+                    Spacer(Modifier.height(5.dp))
+                    Text("S${episode.season} · Episode ${episode.displayNumber.ifBlank{episode.number.toString()}}",color=Color.White,fontSize=21.sp,fontWeight=FontWeight.Black)
+                    Spacer(Modifier.height(4.dp))
+                    Text(episode.title.ifBlank{"Episode "+episode.number},color=Color(0xFFD2D4DD),fontSize=13.sp,fontWeight=FontWeight.Medium)
+                }
+                item{
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                        Column(Modifier.weight(1f)){
+                            Text("Subtitles",color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold)
+                            Text("Subtitle and audio options depend on the source",color=Color(0xFF858A98),fontSize=10.sp)
+                        }
+                        Surface(shape=RoundedCornerShape(10.dp),color=Color(0xFF1B1E27),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF2B2E38))){
+                            Text("SETTINGS  ⚙",Modifier.padding(horizontal=12.dp,vertical=10.dp),color=Color.White,fontSize=9.sp,fontWeight=FontWeight.ExtraBold)
+                        }
+                    }
+                }
+                if(nextEpisode!=null){
+                    item{
+                        Surface(onClick={onEpisode(nextEpisode)},shape=RoundedCornerShape(17.dp),color=Color(0xFF171A22),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282C36))){
+                            Row(Modifier.fillMaxWidth().padding(13.dp),verticalAlignment=Alignment.CenterVertically){
+                                Box(Modifier.size(58.dp,66.dp).clip(RoundedCornerShape(10.dp)).background(Brush.linearGradient(listOf(Color(0xFF3A245E),Color(0xFF202B4D)))),contentAlignment=Alignment.Center){
+                                    Text(nextEpisode.displayNumber.ifBlank{nextEpisode.number.toString()},color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Black)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)){
+                                    Text("UP NEXT",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.4.sp)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(nextEpisode.title.ifBlank{"Episode "+nextEpisode.number},color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold,maxLines=2)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Season ${nextEpisode.season} · Episode ${nextEpisode.displayNumber.ifBlank{nextEpisode.number.toString()}}",color=Color(0xFF858A98),fontSize=10.sp)
+                                }
+                                Text("→",color=colors.primary,fontSize=22.sp,fontWeight=FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+                item{ Text("More episodes",color=Color.White,fontSize=17.sp,fontWeight=FontWeight.ExtraBold) }
+                items(orderedEpisodes.take(8),key={it.url.ifBlank{"${it.season}-${it.number}-${it.title}"}}){item->
+                    val current=item.url==episode.url
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                            .background(if(current)Color(0xFF2A1D1B) else Color(0xFF151820))
+                            .clickable{onEpisode(item)}.padding(11.dp),
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if(current)Color(0xFF5A2A22) else Color(0xFF252938)),contentAlignment=Alignment.Center){
+                            Text(item.displayNumber.ifBlank{item.number.toString()},color=if(current)colors.primary else Color.White,fontSize=11.sp,fontWeight=FontWeight.ExtraBold)
+                        }
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)){
+                            Text(item.title.ifBlank{"Episode "+item.number},color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                            Text("Season ${item.season} · Episode ${item.displayNumber.ifBlank{item.number.toString()}}",color=Color(0xFF858A98),fontSize=10.sp)
+                        }
+                        if(current)Text("PLAYING",color=colors.primary,fontSize=8.sp,fontWeight=FontWeight.ExtraBold)
+                        else Text("▶",color=Color(0xFF9A9EAA),fontSize=11.sp)
+                    }
                 }
             }
         }
