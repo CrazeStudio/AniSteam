@@ -114,6 +114,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
 @Composable private fun Home(onOpen:(String)->Unit,onSources:()->Unit) {
     var q by remember{mutableStateOf("")}
     var submitted by remember{mutableStateOf("")}
+    var showLibrary by remember{mutableStateOf(false)}
     val context=LocalContext.current
     var data by remember{mutableStateOf<List<Anime>>(emptyList())}
     val continueWatching=remember{loadContinueWatchingList(context)}
@@ -175,9 +176,10 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             else->data
         }
     }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF0A0A10),Color(0xFF08080C))))) {
     LazyColumn(
-        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF0A0A10),Color(0xFF08080C)))),
-        contentPadding=PaddingValues(bottom=34.dp)
+        Modifier.fillMaxSize(),
+        contentPadding=PaddingValues(bottom=98.dp)
     ){
         item{
             Row(Modifier.fillMaxWidth().padding(start=20.dp,end=18.dp,top=18.dp,bottom=15.dp),verticalAlignment=Alignment.CenterVertically){
@@ -350,8 +352,97 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             }
         }
     }
+    BottomNavigationBar(
+        modifier=Modifier.align(Alignment.BottomCenter),
+        active="HOME",
+        onHome={q="";submitted="";catalogueFilter="ALL"},
+        onSearch={if(q.isBlank())q=submitted;submitted=""},
+        onLibrary={showLibrary=true},
+        onProfile=onSources
+    )
+    if(showLibrary) LibraryDialog(
+        items=continueWatching,
+        onOpen={watch->showLibrary=false;onOpen(watch.animeSlug)},
+        onDismiss={showLibrary=false}
+    )
 }
 
+
+@Composable private fun BottomNavigationBar(
+    modifier:Modifier=Modifier,
+    active:String,
+    onHome:()->Unit,
+    onSearch:()->Unit,
+    onLibrary:()->Unit,
+    onProfile:()->Unit
+){
+    Surface(
+        modifier=modifier.fillMaxWidth(),
+        color=Color(0xF5111118),
+        tonalElevation=8.dp,
+        shadowElevation=12.dp
+    ){
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=10.dp,vertical=8.dp),
+            horizontalArrangement=Arrangement.spacedBy(4.dp),
+            verticalAlignment=Alignment.CenterVertically
+        ){
+            listOf(Triple("HOME","⌂",onHome),Triple("SEARCH","⌕",onSearch),Triple("LIBRARY","▣",onLibrary),Triple("SOURCES","●",onProfile)).forEach{item->
+                val selected=active==item.first
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(13.dp))
+                        .background(if(selected)Color(0xFF2A1A18) else Color.Transparent)
+                        .clickable{item.third()}.padding(vertical=5.dp),
+                    horizontalAlignment=Alignment.CenterHorizontally
+                ){
+                    Text(item.second,color=if(selected)colors.primary else Color(0xFF858592),fontSize=21.sp,fontWeight=FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(item.first,color=if(selected)colors.primary else Color(0xFF858592),fontSize=8.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.5.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun LibraryDialog(
+    items:List<Episode>,
+    onOpen:(Episode)->Unit,
+    onDismiss:()->Unit
+){
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        shape=RoundedCornerShape(24.dp),
+        containerColor=Color(0xFF14141B),
+        title={Text("Continue watching",color=Color.White,fontWeight=FontWeight.ExtraBold)},
+        text={
+            if(items.isEmpty()){
+                Text("Episodes you play will appear here.",color=Color(0xFF9999A5),fontSize=13.sp)
+            }else{
+                LazyColumn(Modifier.heightIn(max=390.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    items(items,key={it.animeSlug+it.url}){episode->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                                .background(Color(0xFF202029)).clickable{onOpen(episode)}
+                                .padding(12.dp),
+                            verticalAlignment=Alignment.CenterVertically
+                        ){
+                            Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF38211F)),contentAlignment=Alignment.Center){
+                                Text("▶",color=colors.primary,fontSize=11.sp)
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)){
+                                Text(episode.title.ifBlank{"Anime"},color=Color.White,fontSize=12.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                                Text("Episode "+episode.displayNumber.ifBlank{episode.number.toString()},color=Color(0xFF9999A5),fontSize=10.sp)
+                            }
+                            Text("›",color=colors.primary,fontSize=24.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton={TextButton(onClick=onDismiss){Text("CLOSE",color=colors.primary,fontWeight=FontWeight.Bold)}}
+    )
+}
 
 @Composable private fun AnimeGridCard(anime:Anime,modifier:Modifier=Modifier,onClick:()->Unit){
     var pressed by remember(anime.slug){mutableStateOf(false)}
@@ -448,6 +539,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     var chosen by remember{mutableStateOf<Episode?>(null)}
     var episodeQuery by remember{mutableStateOf("")}
     var episodeReload by remember{mutableIntStateOf(0)}
+    var selectedSeason by remember{mutableIntStateOf(1)}
+    var detailsTab by remember{mutableStateOf("EPISODES")}
     
     var playingEpisode by remember{mutableStateOf<Episode?>(null)}
     var playerLoading by remember{mutableStateOf(false)}
@@ -494,10 +587,15 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
         }finally{playerLoading=false}
     }
 
-    val visibleEpisodes=remember(eps,episodeQuery){
+    val availableSeasons=remember(eps){eps.map{it.season.coerceAtLeast(1)}.distinct().sorted()}
+    LaunchedEffect(availableSeasons){
+        if(availableSeasons.isNotEmpty() && selectedSeason !in availableSeasons) selectedSeason=availableSeasons.first()
+    }
+    val visibleEpisodes=remember(eps,episodeQuery,selectedSeason){
+        val seasonEpisodes=if(eps.any{it.season==selectedSeason})eps.filter{it.season==selectedSeason}else eps
         val term=episodeQuery.trim()
-        if(term.isBlank()) eps else eps.filter {
-            it.number.toString().contains(term,true) || it.title.contains(term,true)
+        if(term.isBlank()) seasonEpisodes else seasonEpisodes.filter {
+            it.displayNumber.contains(term,true) || it.number.toString().contains(term,true) || it.title.contains(term,true)
         }
     }
 
@@ -562,8 +660,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=42.dp)){
                 item{
                     Box(
-                        Modifier.fillMaxWidth().height(350.dp)
-                            .clip(RoundedCornerShape(bottomStart=30.dp,bottomEnd=30.dp))
+                        Modifier.fillMaxWidth().height(310.dp)
+                            .clip(RoundedCornerShape(bottomStart=28.dp,bottomEnd=28.dp))
                     ){
                         AsyncImage(anime!!.image,anime!!.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
                         Box(
@@ -586,7 +684,36 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     }
                 }
                 item{
-                    Column(Modifier.padding(horizontal=18.dp,vertical=20.dp)){
+                    Surface(
+                        onClick={eps.lastOrNull()?.let{playingEpisode=it} ?: run{episodeReload++}},
+                        modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).padding(top=16.dp),
+                        shape=RoundedCornerShape(15.dp),color=colors.primary
+                    ){
+                        Row(Modifier.fillMaxWidth().padding(vertical=15.dp),horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically){
+                            Text("▶",color=Color.White,fontSize=13.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Play latest episode",color=Color.White,fontSize=14.sp,fontWeight=FontWeight.ExtraBold)
+                        }
+                    }
+                }
+                item{
+                    Column(Modifier.padding(horizontal=18.dp,vertical=18.dp)){
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                            listOf("OVERVIEW","EPISODES","RELATED").forEach{tab->
+                                Surface(
+                                    onClick={detailsTab=tab},
+                                    modifier=Modifier.weight(1f),
+                                    shape=RoundedCornerShape(11.dp),
+                                    color=if(detailsTab==tab)Color(0xFF2A1A18) else Color(0xFF121219),
+                                    border=androidx.compose.foundation.BorderStroke(1.dp,if(detailsTab==tab)colors.primary else Color(0xFF252530))
+                                ){
+                                    Box(Modifier.padding(vertical=11.dp),contentAlignment=Alignment.Center){
+                                        Text(tab,color=if(detailsTab==tab)colors.primary else Color(0xFF92929F),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.4.sp)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(18.dp))
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                             Surface(color=Color(0xFF16161E),shape=RoundedCornerShape(10.dp)){
                                 Text(anime!!.type,color=Color(0xFFB9B9C3),fontSize=10.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=11.dp,vertical=7.dp))
@@ -600,11 +727,16 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 }
                             }
                         }
-                        Spacer(Modifier.height(22.dp))
-                        Text("ABOUT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
-                        Spacer(Modifier.height(7.dp))
-                        Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB2B2BC),fontSize=13.sp,lineHeight=20.sp)
-                        Spacer(Modifier.height(26.dp))
+                        if(detailsTab=="OVERVIEW"){
+                            Text("ABOUT",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.8.sp)
+                            Spacer(Modifier.height(7.dp))
+                            Text(anime!!.synopsis.ifBlank{"No synopsis available."},color=Color(0xFFB2B2BC),fontSize=13.sp,lineHeight=20.sp)
+                            Spacer(Modifier.height(18.dp))
+                            Text("A focused anime experience",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                            Spacer(Modifier.height(5.dp))
+                            Text("Choose a season, find an episode, and continue watching without losing your place.",color=Color(0xFF888894),fontSize=12.sp,lineHeight=18.sp)
+                        }
+                        if(detailsTab=="EPISODES"){
                         Row(verticalAlignment=Alignment.CenterVertically){
                             Column(Modifier.weight(1f)){
                                 Text("Episodes",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black)
@@ -630,8 +762,38 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 )
                             )
                         }
+                        if(detailsTab=="RELATED"){
+                            Column(Modifier.fillMaxWidth().padding(vertical=28.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                                Text("Discover your next series",color=Color.White,fontSize=15.sp,fontWeight=FontWeight.Bold)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Related-title recommendations will appear here when provided by the source.",color=Color(0xFF858590),fontSize=11.sp,lineHeight=17.sp)
+                            }
+                        }
+                        if(!loading && eps.isNotEmpty()){
+                            Spacer(Modifier.height(14.dp))
+                            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                                Text("SEASON",color=Color(0xFF858590),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.sp)
+                                Spacer(Modifier.width(10.dp))
+                                LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
+                                    items(availableSeasons){seasonNumber->
+                                        Surface(
+                                            onClick={selectedSeason=seasonNumber},
+                                            shape=RoundedCornerShape(10.dp),
+                                            color=if(selectedSeason==seasonNumber)colors.primary else Color(0xFF191920),
+                                            border=androidx.compose.foundation.BorderStroke(1.dp,if(selectedSeason==seasonNumber)colors.primary else Color(0xFF2A2A34))
+                                        ){
+                                            Text("Season "+seasonNumber,Modifier.padding(horizontal=12.dp,vertical=9.dp),color=Color.White,fontSize=10.sp,fontWeight=FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+
                     }
                 }
+                if(detailsTab=="EPISODES"){
                 if(loading){
                     item{
                         Box(Modifier.fillMaxWidth().height(100.dp),contentAlignment=Alignment.Center){
@@ -677,6 +839,8 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         }
                     }
                 }
+                }
+
             }
         }
     }
