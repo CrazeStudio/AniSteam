@@ -762,13 +762,6 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 )
                             )
                         }
-                        if(detailsTab=="RELATED"){
-                            Column(Modifier.fillMaxWidth().padding(vertical=28.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                                Text("Discover your next series",color=Color.White,fontSize=15.sp,fontWeight=FontWeight.Bold)
-                                Spacer(Modifier.height(6.dp))
-                                Text("Related-title recommendations will appear here when provided by the source.",color=Color(0xFF858590),fontSize=11.sp,lineHeight=17.sp)
-                            }
-                        }
                         if(!loading && eps.isNotEmpty()){
                             Spacer(Modifier.height(14.dp))
                             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
@@ -786,6 +779,15 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                    }
+                        if(detailsTab=="RELATED"){
+                            Column(Modifier.fillMaxWidth().padding(vertical=28.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                                Text("Discover your next series",color=Color.White,fontSize=15.sp,fontWeight=FontWeight.Bold)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Related-title recommendations will appear here when provided by the source.",color=Color(0xFF858590),fontSize=11.sp,lineHeight=17.sp)
                             }
                         }
 
