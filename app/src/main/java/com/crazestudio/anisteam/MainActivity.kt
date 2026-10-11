@@ -1124,7 +1124,7 @@ private suspend fun fetchEpisodesBySlug(slug:String,season:Int=1)=withContext(Di
         catch(e:kotlinx.coroutines.CancellationException){throw e}
         catch(e:Exception){lastError=e}
     }
-    val unique=results.distinctBy{it.url}.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
+    val unique=results.groupBy{it.url}.mapNotNull{(_,items)->items.maxByOrNull{(if(it.displayNumber.contains("x",true))4 else 0)+(if(it.season>1)2 else 0)+(if(it.title.isNotBlank())1 else 0)}}.sortedWith(compareBy<Episode>{it.season}.thenBy{it.number}.thenBy{it.url})
     if(unique.isEmpty() && lastError!=null)throw java.io.IOException("Could not load episodes from API or AnimeSalt directly.",lastError)
     unique
 }
