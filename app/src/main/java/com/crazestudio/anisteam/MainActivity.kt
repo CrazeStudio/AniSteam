@@ -1599,7 +1599,8 @@ private class AnimeSaltChromeClient(
                     Button(onClick={playbackError=null;exoPlayer.prepare();exoPlayer.play()},colors=ButtonDefaults.buttonColors(containerColor=colors.primary)){Text("RETRY",fontWeight=FontWeight.Bold)}
                 }
             }
-            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.TopCenter)){
+            if(controlsVisible){
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()){
                 Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
                     Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=30.sp)}}
                     Spacer(Modifier.width(12.dp))
@@ -1610,14 +1611,16 @@ private class AnimeSaltChromeClient(
                     Surface(onClick={fullscreen=!fullscreen},shape=RoundedCornerShape(12.dp),color=Color(0x770D0D12)){Box(Modifier.size(42.dp),contentAlignment=Alignment.Center){Text(if(fullscreen)"⊡" else "⛶",color=Color.White,fontSize=21.sp)}}
                 }
             }
-            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(160)),exit=fadeOut(tween(200)),modifier=Modifier.align(Alignment.Center)){
+            if(controlsVisible){
+                Box(Modifier.align(Alignment.Center).fillMaxSize(),contentAlignment=Alignment.Center){
                 Row(horizontalArrangement=Arrangement.spacedBy(24.dp),verticalAlignment=Alignment.CenterVertically){
                     Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition-10_000L).coerceAtLeast(0L));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↺10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
                     Surface(onClick={if(exoPlayer.isPlaying)exoPlayer.pause()else exoPlayer.play();controlsVisible=true},shape=RoundedCornerShape(50),color=colors.primary){Box(Modifier.size(72.dp),contentAlignment=Alignment.Center){Text(if(isPlaying)"Ⅱ" else "▶",color=Color.White,fontSize=25.sp,fontWeight=FontWeight.Bold)}}
                     Surface(onClick={exoPlayer.seekTo((exoPlayer.currentPosition+10_000L).coerceAtMost(if(durationMs>0)durationMs else Long.MAX_VALUE));controlsVisible=true},shape=RoundedCornerShape(50),color=Color(0x880B0B10)){Box(Modifier.size(54.dp),contentAlignment=Alignment.Center){Text("↻10",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold)}}
                 }
             }
-            AnimatedVisibility(visible=controlsVisible,enter=fadeIn(tween(180)),exit=fadeOut(tween(220)),modifier=Modifier.align(Alignment.BottomCenter)){
+            if(controlsVisible){
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth(),contentAlignment=Alignment.BottomCenter){
                 Column(Modifier.fillMaxWidth().padding(horizontal=18.dp,vertical=10.dp)){
                     Slider(value=if(durationMs>0)(positionMs.toFloat()/durationMs.toFloat()).coerceIn(0f,1f)else 0f,
                         onValueChange={fraction->scrubbing=true;positionMs=(fraction*durationMs).toLong().coerceAtLeast(0L)},
