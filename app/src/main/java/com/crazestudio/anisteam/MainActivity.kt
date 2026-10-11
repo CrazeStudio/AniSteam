@@ -77,7 +77,7 @@ class MainActivity: ComponentActivity() {
 
 private val SOURCES = listOf(AnimeSource("animesalt","AnimeSalt","https://animesalt.cx"),AnimeSource("toonstream","ToonStream","https://toonstream.us"))
 
-private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(0xFF111116),surfaceVariant=Color(0xFF1A1A21),primary=Color(0xFFFF7A18),secondary=Color(0xFFFFD2B0))
+private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(0xFF161820),surfaceVariant=Color(0xFF1C1F27),primary=Color(0xFFFF5C36),secondary=Color(0xFFFFC3A7))
 
 @Composable fun App() {
     MaterialTheme(colorScheme=colors) {
@@ -192,11 +192,11 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                     Row(verticalAlignment=Alignment.CenterVertically){
                         Box(Modifier.size(5.dp).clip(RoundedCornerShape(50)).background(Color(0xFF4ADE80)))
                         Spacer(Modifier.width(5.dp))
-                        Text("ANIMESALT CATALOGUE",color=Color(0xFF8D8D9B),fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.4.sp)
+                        Text("ANIME, ALL IN ONE PLACE",color=Color(0xFF8D8D9B),fontSize=8.sp,fontWeight=FontWeight.Bold,letterSpacing=0.8.sp,maxLines=1)
                     }
                 }
                 Surface(onClick=onSources,shape=RoundedCornerShape(14.dp),color=Color(0xFF171720),border=androidx.compose.foundation.BorderStroke(1.dp,Color(0xFF282832))){
-                    Text("SOURCE  ⌄",Modifier.padding(horizontal=12.dp,vertical=11.dp),color=Color(0xFFE5E5EC),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.6.sp)
+                    Text("SOURCES  ⌄",Modifier.padding(horizontal=12.dp,vertical=11.dp),color=Color(0xFFE5E5EC),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=0.4.sp)
                 }
             }
         }
@@ -256,7 +256,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             item{
                 Row(Modifier.fillMaxWidth().padding(start=19.dp,end=18.dp,top=26.dp,bottom=12.dp),verticalAlignment=Alignment.CenterVertically){
                     Column(Modifier.weight(1f)){
-                        Text("PICK UP WHERE YOU LEFT OFF",color=Color(0xFF8E8E9A),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.4.sp)
+                        Text("YOUR RECENTLY PLAYED",color=Color(0xFF8E8E9A),fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.2.sp)
                         Text("Continue watching",color=Color.White,fontSize=19.sp,fontWeight=FontWeight.ExtraBold)
                     }
                     Text("RECENT",color=colors.primary,fontSize=9.sp,fontWeight=FontWeight.Black,letterSpacing=1.sp)
@@ -639,16 +639,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
     }
 
     Column(Modifier.fillMaxSize().background(Color(0xFF07070B))){
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),
-            verticalAlignment=Alignment.CenterVertically
-        ){
-            TextButton(onClick=onBack){
-                Text("‹  BACK",color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold)
-            }
-            Spacer(Modifier.weight(1f))
-            Text("ANISTEAM",color=Color(0xFF777783),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
-        }
+        Spacer(Modifier.height(0.dp))
 
         when{
             loading && anime==null->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
@@ -660,7 +651,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
             anime!=null->LazyColumn(contentPadding=PaddingValues(bottom=42.dp)){
                 item{
                     Box(
-                        Modifier.fillMaxWidth().height(310.dp)
+                        Modifier.fillMaxWidth().height(324.dp)
                             .clip(RoundedCornerShape(bottomStart=28.dp,bottomEnd=28.dp))
                     ){
                         AsyncImage(anime!!.image,anime!!.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
@@ -671,13 +662,22 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                                 )
                             )
                         )
+                        Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal=14.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically){
+                            Surface(onClick=onBack,shape=RoundedCornerShape(50),color=Color(0x99101016)){
+                                Box(Modifier.size(40.dp),contentAlignment=Alignment.Center){Text("‹",color=Color.White,fontSize=29.sp)}
+                            }
+                            Spacer(Modifier.weight(1f))
+                            Surface(shape=RoundedCornerShape(12.dp),color=Color(0x99101016)){
+                                Text("ANISTEAM",Modifier.padding(horizontal=12.dp,vertical=10.dp),color=Color.White,fontSize=9.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.2.sp)
+                            }
+                        }
                         Column(Modifier.align(Alignment.BottomStart).padding(22.dp)){
-                            Text("ANIME",color=colors.primary,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
+                            Text(if(anime!!.kind=="movie")"FEATURED MOVIE" else "ACTION  •  ANIME",color=Color(0xFFFFA16F),fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.6.sp)
                             Spacer(Modifier.height(7.dp))
                             Text(anime!!.title,color=Color.White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold,maxLines=3)
                             Spacer(Modifier.height(7.dp))
                             Text(
-                                anime!!.type+"  •  "+anime!!.episodes+" episodes  •  ★ "+anime!!.score,
+                                anime!!.type+"  •  "+anime!!.episodes+" episodes"+if(anime!!.score.isNotBlank() && anime!!.score!="—")"  •  ★ "+anime!!.score else "",
                                 color=Color(0xFFD4D4DC),fontSize=11.sp
                             )
                         }
@@ -740,7 +740,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                         Row(verticalAlignment=Alignment.CenterVertically){
                             Column(Modifier.weight(1f)){
                                 Text("Episodes",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Black)
-                                Text(if(eps.isEmpty())"AnimeSalt episode list" else "${eps.size} episodes available",color=Color(0xFF777783),fontSize=11.sp)
+                                Text(if(eps.isEmpty())"Full episode guide" else "${visibleEpisodes.size} episodes in Season $selectedSeason",color=Color(0xFF858A98),fontSize=11.sp)
                             }
                             Text(if(loading)"…" else eps.size.toString(),color=colors.primary,fontSize=14.sp,fontWeight=FontWeight.Bold)
                         }
@@ -803,17 +803,25 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                 }else{
                     items(visibleEpisodes,key={it.url}){ep->
                         Row(
-                            Modifier.padding(horizontal=18.dp,vertical=4.dp).fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp)).background(Color(0xFF121217))
-                                .clickable{chosen=ep}.padding(horizontal=13.dp,vertical=12.dp),
+                            Modifier.padding(horizontal=18.dp,vertical=5.dp).fillMaxWidth()
+                                .clip(RoundedCornerShape(17.dp)).background(Color(0xFF151820))
+                                .clickable{chosen=ep}.padding(9.dp),
                             verticalAlignment=Alignment.CenterVertically
                         ){
-                            Text(ep.displayNumber.ifBlank{ep.number.toString()}.take(8),color=colors.primary,fontSize=12.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.width(42.dp))
-                            Column(Modifier.weight(1f)){
-                                Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.SemiBold,fontSize=13.sp,maxLines=2)
-                                if(ep.aired.isNotBlank())Text(ep.aired,color=Color(0xFF70707B),fontSize=9.sp)
+                            Box(Modifier.size(84.dp,58.dp).clip(RoundedCornerShape(11.dp))){
+                                AsyncImage(anime!!.image,anime!!.title,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+                                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x11000000),Color(0xAA05050A)))))
+                                Box(Modifier.align(Alignment.BottomStart).padding(5.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xDD101016)).padding(horizontal=5.dp,vertical=3.dp)){
+                                    Text("S"+ep.season+"  ·  "+ep.displayNumber.ifBlank{ep.number.toString()},color=Color.White,fontSize=8.sp,fontWeight=FontWeight.ExtraBold,maxLines=1)
+                                }
                             }
-                            Box(Modifier.size(36.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B1B24)),contentAlignment=Alignment.Center){
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)){
+                                Text(if(ep.title.isBlank())"Episode "+ep.number else ep.title,color=Color.White,fontWeight=FontWeight.Bold,fontSize=13.sp,maxLines=2,lineHeight=16.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text("EPISODE "+ep.displayNumber.ifBlank{ep.number.toString()}+(if(ep.aired.isNotBlank())"  ·  "+ep.aired else ""),color=Color(0xFF858A98),fontSize=9.sp,fontWeight=FontWeight.Medium,maxLines=1)
+                            }
+                            Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(Color(0xFF30201E)),contentAlignment=Alignment.Center){
                                 Text("▶",color=colors.primary,fontSize=10.sp)
                             }
                         }
