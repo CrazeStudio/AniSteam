@@ -309,7 +309,7 @@ private val colors = darkColorScheme(background=Color(0xFF08080B),surface=Color(
                 Column(Modifier.fillMaxWidth().padding(vertical=45.dp),horizontalAlignment=Alignment.CenterHorizontally){
                     CircularProgressIndicator(color=colors.primary,strokeWidth=2.5.dp)
                     Spacer(Modifier.height(12.dp))
-                    Text("Finding titles from AnimeSalt…",color=Color(0xFF888894),fontSize=11.sp)
+                    Text("Loading titles…",color=Color(0xFF888894),fontSize=11.sp)
                 }
             }
             error!=null->item{
@@ -793,8 +793,21 @@ private suspend fun fetchAnime(q:String,page:Int=1)=withContext(Dispatchers.IO){
         .distinctBy{it.sourceId+":"+it.slug}
 }
 private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
-    val results=mutableListOf<Anime>()
     var lastError:Exception?=null
+    // Prefer the combined catalogue endpoint so a failure of one source does not
+    // make the entire home screen appear broken.
+    try{
+        val json=fetchApiJson("/catalogue?page=$page")
+        val items=jsonArrayObjects(json.optJSONArray("results"))
+        val combined=items.mapNotNull{catalogAnime(it)}
+            .distinctBy{it.sourceId+":"+it.slug}
+        if(combined.isNotEmpty())return@withContext combined
+        lastError=java.io.IOException("The catalogue endpoint returned no titles.")
+    }catch(e:kotlinx.coroutines.CancellationException){throw e}
+    catch(e:Exception){lastError=e}
+
+    // Compatibility fallback for older deployments and partial source outages.
+    val results=mutableListOf<Anime>()
     for(endpoint in listOf("/api/series?page=$page","/api/movies?page=$page")){
         try{
             val json=fetchApiJson(endpoint)
@@ -805,7 +818,10 @@ private suspend fun fetchHome(page:Int=1)=withContext(Dispatchers.IO){
         catch(e:Exception){lastError=e}
     }
     val unique=results.distinctBy{it.sourceId+":"+it.slug}
-    if(unique.isEmpty() && page==1)throw java.io.IOException("AniSteam API returned no catalogue titles. Please retry in a moment.",lastError)
+    if(unique.isEmpty() && page==1)throw java.io.IOException(
+        "Catalogue sources are temporarily unavailable. Tap TRY AGAIN in a moment.",
+        lastError
+    )
     unique
 }
 
