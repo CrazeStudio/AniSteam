@@ -365,6 +365,7 @@ private val colors = darkColorScheme(background=Color(0xFF0B0D12),surface=Color(
         onOpen={watch->showLibrary=false;onOpen(watch.animeSlug)},
         onDismiss={showLibrary=false}
     )
+    }
 }
 
 
