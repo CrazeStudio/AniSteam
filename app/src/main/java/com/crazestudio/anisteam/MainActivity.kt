@@ -970,7 +970,11 @@ private suspend fun fetchDirectEpisodes(link:String,slug:String)=withContext(Dis
     val all=mutableListOf<Episode>()
     for(targetSeason in seasons){
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        var found=parseEpisodeList(doc,slug,targetSeason).distinctBy{it.url}
+        // The source page only renders one season's links at a time. If episode
+        // URLs do not encode their season, do not mistake the first season for every season.
+        var found=if(targetSeason==1 || seasonsInLinks.contains(targetSeason))
+            parseEpisodeList(doc,slug,targetSeason).distinctBy{it.url}
+        else emptyList()
         if(found.isEmpty()){
             val button=seasonButtons.firstOrNull{it.first==targetSeason}
             if(button!=null){
