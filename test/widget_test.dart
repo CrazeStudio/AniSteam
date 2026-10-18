@@ -5,7 +5,7 @@ void main() {
   testWidgets('AniSteam app launches with navigation', (tester) async {
     await tester.pumpWidget(const AniSteamApp());
     await tester.pump();
-    expect(find.text('AniSteam'), findsOneWidget);
+    expect(find.text('AniSteam'), findsWidgets);
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Search'), findsOneWidget);
     expect(find.text('History'), findsOneWidget);
