@@ -204,73 +204,79 @@ class SettingsTab extends StatefulWidget {
   @override State<SettingsTab> createState() => _SettingsTabState();
 }
 class _SettingsTabState extends State<SettingsTab> {
-  late final TextEditingController apiController;
   bool checking = false;
-  String? apiStatus;
-  @override void initState() {
-    super.initState();
-    apiController = TextEditingController(text: defaultApiBase);
-    _loadApi();
-  }
-  Future<void> _loadApi() async {
-    final saved = await AniApi.baseUrl();
-    if (mounted) apiController.text = saved;
-  }
-  @override void dispose() { apiController.dispose(); super.dispose(); }
-  Future<void> saveApi() async {
-    final value = apiController.text.trim().replaceFirst(RegExp(r'/+$'), '');
-    final uri = Uri.tryParse(value);
-    if (uri == null || !['https','http'].contains(uri.scheme) || uri.host.isEmpty) {
-      setState(() => apiStatus = 'Enter a valid http:// or https:// API URL.');
-      return;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('api_base_url', value);
-    if (mounted) setState(() => apiStatus = 'API URL saved. Tap Test API to check the server.');
-  }
-  Future<void> testApi() async {
-    await saveApi();
-    if (!mounted || apiStatus?.startsWith('Enter a valid') == true) return;
-    setState(() { checking = true; apiStatus = 'Connecting…'; });
+  String? connectionStatus;
+
+  Future<void> checkConnection() async {
+    if (checking) return;
+    setState(() { checking = true; connectionStatus = 'Checking connection…'; });
     try {
       await AniApi.get('/catalogue', {'page':'1'});
-      if (mounted) setState(() => apiStatus = 'Connected. The API responded successfully.');
-    } catch (e) {
-      if (mounted) setState(() => apiStatus = 'Could not reach API: $e');
+      if (mounted) setState(() => connectionStatus = 'Connected. AniSteam received a response.');
+    } on Exception catch (e) {
+      final message = e.toString();
+      final dnsFailure = message.contains('Failed host lookup') ||
+          message.contains('SocketException') ||
+          message.contains('No address associated with hostname');
+      if (mounted) {
+        setState(() => connectionStatus = dnsFailure
+          ? 'The AniSteam service could not be reached. Check your internet connection and try again later.'
+          : 'Connection failed. Please try again later.');
+      }
+    } catch (_) {
+      if (mounted) setState(() => connectionStatus = 'Connection failed. Please try again later.');
     } finally {
       if (mounted) setState(() => checking = false);
     }
   }
+
   @override Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Settings', style: TextStyle(fontWeight: FontWeight.w900))),
     body: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('CONTENT SOURCES', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:10),
       for (final option in const [('COMBINED','Combined','Search ToonStream and HiAnime'),('TOONSTREAM','ToonStream','Use ToonStream endpoints'),('HIANIME','HiAnime','Use HiAnime endpoints')])
-        Card(child: RadioListTile<String>(value:option.$1,groupValue:widget.sourceMode,title:Text(option.$2,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(option.$3),activeColor:lime,onChanged:(v){if(v!=null)widget.onMode(v);})),
+        Card(child: RadioListTile<String>(
+          value: option.$1,
+          groupValue: widget.sourceMode,
+          title: Text(option.$2, style: const TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: Text(option.$3),
+          activeColor: lime,
+          onChanged: (value) { if (value != null) widget.onMode(value); },
+        )),
       const SizedBox(height:22),
-      const Text('API CONNECTION', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+      const Text('SERVICE STATUS', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:8),
-      const Text('The catalogue, search, episodes and streams need a reachable API server. If the current host no longer resolves, enter the URL of your deployed AniSteam API here.', style:TextStyle(color:Color(0xFF9CA2B0),height:1.45)),
+      const Text('The service connection is managed privately by AniSteam. Its server address is not shown or editable here.', style: TextStyle(color: Color(0xFF9CA2B0), height: 1.45)),
       const SizedBox(height:12),
-      TextField(controller:apiController,keyboardType:TextInputType.url,decoration:const InputDecoration(labelText:'API base URL',hintText:'https://your-api.example.com',prefixIcon:Icon(Icons.cloud_outlined))),
-      const SizedBox(height:10),
-      Row(children:[
-        Expanded(child:OutlinedButton(onPressed:checking?null:saveApi,child:const Text('Save URL'))),
-        const SizedBox(width:10),
-        Expanded(child:FilledButton(onPressed:checking?null:testApi,child:checking?const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)):const Text('Test API'))),
-      ]),
-      if (apiStatus != null) Padding(padding:const EdgeInsets.only(top:12),child:Text(apiStatus!,style:TextStyle(color:apiStatus!.startsWith('Connected')?lime:const Color(0xFFFFB86B),height:1.4))),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: checking ? null : checkConnection,
+          icon: checking
+            ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2))
+            : const Icon(Icons.wifi_tethering_rounded),
+          label: Text(checking ? 'Checking…' : 'Check connection'),
+        ),
+      ),
+      if (connectionStatus != null)
+        Padding(
+          padding: const EdgeInsets.only(top:12),
+          child: Text(connectionStatus!, style: TextStyle(
+            color: connectionStatus!.startsWith('Connected') ? lime : const Color(0xFFFFB86B),
+            height:1.4,
+          )),
+        ),
       const SizedBox(height:22),
       const Text('ABOUT', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:10),
       const Card(child:ListTile(leading:Icon(Icons.play_circle_fill_rounded,color:lime,size:32),title:Text('AniSteam',style:TextStyle(fontWeight:FontWeight.w900)),subtitle:Text('Anime discovery · episode lists · stream selection · local watch history'))),
-      const Padding(padding:EdgeInsets.all(8),child:Text('AniSteam connects to your configured API. Playback availability depends on the provider and returned stream. It does not bypass DRM, login, paywalls, CAPTCHA, or anti-bot restrictions.',style:TextStyle(color:Color(0xFF9CA2B0),height:1.45))),
+      const Padding(padding:EdgeInsets.all(8),child:Text('AniSteam connects to its configured service. Playback availability depends on the provider and returned stream. It does not bypass DRM, login, paywalls, CAPTCHA, or anti-bot restrictions.',style:TextStyle(color:Color(0xFF9CA2B0),height:1.45))),
     ]),
   );
 }
 class Brand extends StatelessWidget {const Brand({super.key});@override Widget build(BuildContext context)=>Row(children:[Image.asset('assets/anisteam_logo.webp',width:30,height:30,fit:BoxFit.contain,errorBuilder:(_,__,___)=>const Icon(Icons.play_circle_fill_rounded,color:lime,size:29)),const SizedBox(width:9),const Text('AniSteam',style:TextStyle(fontWeight:FontWeight.w900))]);}
 class AnimeCard extends StatelessWidget {const AnimeCard({super.key,required this.anime,required this.onTap});final Anime anime;final VoidCallback onTap;@override Widget build(BuildContext context)=>InkWell(onTap:onTap,borderRadius:BorderRadius.circular(18),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(17),child:Stack(fit:StackFit.expand,children:[if(anime.image.isNotEmpty)Image.network(anime.image,fit:BoxFit.cover,errorBuilder:(_,__,___)=>const PosterPlaceholder())else const PosterPlaceholder(),const Positioned(right:10,top:10,child:Icon(Icons.play_circle_fill_rounded,color:lime,size:27))]))),const SizedBox(height:9),Text(anime.title,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:13)),const SizedBox(height:4),Text(anime.source.toUpperCase(),style:const TextStyle(color:Color(0xFF9CA2B0),fontSize:9,letterSpacing:1.1))]));}
 class PosterPlaceholder extends StatelessWidget {const PosterPlaceholder({super.key});@override Widget build(BuildContext context)=>Container(color:const Color(0xFF1B202B),child:const Center(child:Icon(Icons.movie_outlined,color:Color(0xFF6F7787),size:45)));}
-class ErrorView extends StatelessWidget {const ErrorView({super.key,required this.message,required this.retry});final String message;final VoidCallback retry;@override Widget build(BuildContext context){final networkFailure=message.contains('Failed host lookup')||message.contains('SocketException')||message.contains('No address associated with hostname');final shown=networkFailure?'AniSteam cannot reach its API server. Check your internet connection. If it keeps failing, open Settings → API Connection and enter the current deployed API URL.\\n\\nDetails: $message':message;return Center(child:Padding(padding:const EdgeInsets.all(22),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.cloud_off_rounded,size:40,color:Color(0xFFFFB86B)),const SizedBox(height:12),const Text('Could not load data',style:TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(shown,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0))),const SizedBox(height:14),OutlinedButton.icon(onPressed:retry,icon:const Icon(Icons.refresh_rounded),label:const Text('Try again'))])));}}
+class ErrorView extends StatelessWidget {const ErrorView({super.key,required this.message,required this.retry});final String message;final VoidCallback retry;@override Widget build(BuildContext context){final networkFailure=message.contains('Failed host lookup')||message.contains('SocketException')||message.contains('No address associated with hostname');final shown=networkFailure?'AniSteam could not reach its service. Check your internet connection and try again in a moment.':message;return Center(child:Padding(padding:const EdgeInsets.all(22),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.cloud_off_rounded,size:40,color:Color(0xFFFFB86B)),const SizedBox(height:12),const Text('Could not load data',style:TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(shown,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0))),const SizedBox(height:14),OutlinedButton.icon(onPressed:retry,icon:const Icon(Icons.refresh_rounded),label:const Text('Try again'))])));}}
 class EmptyView extends StatelessWidget {const EmptyView({super.key,required this.title,required this.message});final String title,message;@override Widget build(BuildContext context)=>Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.video_library_outlined,size:43,color:Color(0xFF858B99)),const SizedBox(height:12),Text(title,textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(message,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0),height:1.4))])));}
