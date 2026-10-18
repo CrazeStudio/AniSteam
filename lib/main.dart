@@ -53,8 +53,15 @@ class AniApi {
   static Future<String> baseUrl() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = (prefs.getString('api_base_url') ?? fallbackBaseUrl ?? defaultApiBase).trim();
-      return saved.replaceFirst(RegExp(r'/+
+      var saved = (prefs.getString('api_base_url') ?? fallbackBaseUrl ?? defaultApiBase).trim();
+      while (saved.endsWith('/')) { saved = saved.substring(0, saved.length - 1); }
+      return saved;
+    } catch (_) {
+      var fallback = fallbackBaseUrl ?? defaultApiBase;
+      while (fallback.endsWith('/')) { fallback = fallback.substring(0, fallback.length - 1); }
+      return fallback;
+    }
+  }
   static Future<dynamic> get(String path, [Map<String,String>? query]) async {
     final base = await baseUrl();
     final parsedBase = Uri.tryParse(base);
