@@ -49,6 +49,8 @@ class Anime {
 }
 
 class AniApi {
+  static String? fallbackBaseUrl;
+
   static Future<String> baseUrl() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -124,18 +126,30 @@ class _AppShellState extends State<AppShell> {
   final history=<Anime>[]; final historyKey='anisteam_watch_history';
   @override void initState(){super.initState();_load();}
   Future<void> _load() async {
-    final p=await SharedPreferences.getInstance();
-    final raw=p.getString('anisteam_watch_history');
-    if(raw!=null){try{history.addAll((jsonDecode(raw) as List).whereType<Map>().map((m)=>Anime.fromJson(Map<String,dynamic>.from(m))));}catch(_){}}
-    if(mounted)setState(()=>sourceMode=p.getString('source_mode')??'COMBINED');
+    try {
+      final p=await SharedPreferences.getInstance();
+      final raw=p.getString(historyKey);
+      if(raw!=null){try{history.addAll((jsonDecode(raw) as List).whereType<Map>().map((m)=>Anime.fromJson(Map<String,dynamic>.from(m))));}catch(_){}}
+      if(mounted)setState(()=>sourceMode=p.getString('source_mode')??'COMBINED');
+    } catch (_) {
+      // Keep the catalogue usable even if local preference storage is unavailable.
+      if(mounted)setState(()=>sourceMode='COMBINED');
+    }
   }
-  Future<void> setMode(String mode) async {final p=await SharedPreferences.getInstance();await p.setString('source_mode',mode);if(mounted)setState(()=>sourceMode=mode);}
+  Future<void> setMode(String mode) async {
+    try {final p=await SharedPreferences.getInstance();await p.setString('source_mode',mode);} catch (_) {}
+    if(mounted)setState(()=>sourceMode=mode);
+  }
   Future<void> addHistory(Anime anime) async {
     history.removeWhere((a)=>a.url==anime.url);history.insert(0,anime);if(history.length>100)history.removeRange(100,history.length);
-    final p=await SharedPreferences.getInstance();await p.setString(historyKey,jsonEncode(history.map((a)=>a.toJson()).toList()));
+    try {final p=await SharedPreferences.getInstance();await p.setString(historyKey,jsonEncode(history.map((a)=>a.toJson()).toList()));} catch (_) {}
     if(mounted)setState((){});
   }
-  Future<void> clearHistory() async {history.clear();final p=await SharedPreferences.getInstance();await p.remove(historyKey);if(mounted)setState((){});}
+  Future<void> clearHistory() async {
+    history.clear();
+    try {final p=await SharedPreferences.getInstance();await p.remove(historyKey);} catch (_) {}
+    if(mounted)setState((){});
+  }
   @override Widget build(BuildContext context){
     final pages=[
       HomeTab(sourceMode:sourceMode,onOpen:(a)=>openDetails(a)),
@@ -229,7 +243,8 @@ class _SettingsTabState extends State<SettingsTab> {
       await prefs.setString('api_base_url', value);
       if (mounted) setState(() => apiStatus = 'API URL saved. Tap Test API to check the server.');
     } catch (e) {
-      if (mounted) setState(() => apiStatus = 'Could not save settings on this install: $e');
+      AniApi.fallbackBaseUrl = value;
+      if (mounted) setState(() => apiStatus = 'API URL applied for this session, but Android storage failed: $e');
     }
   }
   Future<void> testApi() async {
@@ -280,7 +295,7 @@ class ErrorView extends StatelessWidget {const ErrorView({super.key,required thi
 class EmptyView extends StatelessWidget {const EmptyView({super.key,required this.title,required this.message});final String title,message;@override Widget build(BuildContext context)=>Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.video_library_outlined,size:43,color:Color(0xFF858B99)),const SizedBox(height:12),Text(title,textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(message,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0),height:1.4))])));}), '');
     } catch (_) {
       // A preference-channel failure must not prevent the app from opening.
-      return defaultApiBase;
+      return fallbackBaseUrl ?? defaultApiBase;
     }
   }
   static Future<dynamic> get(String path, [Map<String,String>? query]) async {
