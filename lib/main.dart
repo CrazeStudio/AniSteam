@@ -227,8 +227,12 @@ class _SettingsTabState extends State<SettingsTab> {
     _loadApi();
   }
   Future<void> _loadApi() async {
-    final saved = await AniApi.baseUrl();
-    if (mounted) apiController.text = saved;
+    try {
+      final saved = await AniApi.baseUrl();
+      if (mounted) apiController.text = saved;
+    } catch (e) {
+      if (mounted) setState(() => apiStatus = 'Could not load saved settings; using the default API for this session.');
+    }
   }
   @override void dispose() { apiController.dispose(); super.dispose(); }
   Future<void> saveApi() async {
