@@ -49,10 +49,10 @@ class Anime {
 }
 
 class AniApi {
-  // Keep the service endpoint aligned with AniSteam-2. Ignore any legacy
-  // api_base_url value saved by older builds; it may point to a stale deployment.
-  // The endpoint is intentionally not editable or displayed in Settings.
-  static Future<String> baseUrl() async => defaultApiBase.replaceFirst(RegExp(r'/+
+  // Ignore stale endpoint overrides from older builds and use the configured
+  // AniSteam-2 service endpoint consistently.
+  static Future<String> baseUrl() async =>
+      defaultApiBase.replaceFirst(RegExp(r'/+
   static Future<dynamic> get(String path, [Map<String,String>? query]) async {
     final base = await baseUrl();
     final parsedBase = Uri.tryParse(base);
