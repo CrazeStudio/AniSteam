@@ -1,7 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:anisteam/main.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets('AniSteam app launches with navigation', (tester) async {
     await tester.pumpWidget(const AniSteamApp());
     await tester.pump();
