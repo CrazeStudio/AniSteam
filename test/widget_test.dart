@@ -12,6 +12,7 @@ void main() {
     await tester.pumpWidget(const AniSteamApp());
     await tester.pump();
     expect(find.text('AniSteam'), findsWidgets);
+    expect(find.byType(AniSteamLogo), findsWidgets);
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Search'), findsOneWidget);
     expect(find.text('History'), findsOneWidget);
@@ -31,4 +32,12 @@ void main() {
     expect(find.text('Save URL'), findsNothing);
     expect(find.text('Test API'), findsNothing);
   });
+
+  test('ignores an obsolete saved endpoint', () async {
+    SharedPreferences.setMockInitialValues({
+      'api_base_url': 'https://stale.invalid',
+    });
+    expect(await AniApi.baseUrl(), defaultApiBase);
+  });
+
 }
