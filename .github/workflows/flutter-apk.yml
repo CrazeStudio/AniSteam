@@ -50,6 +50,23 @@ jobs:
             done
           done
           rm -f "$res"/mipmap-anydpi-v26/ic_launcher.xml "$res"/mipmap-anydpi-v26/ic_launcher_round.xml
+      - name: Probe configured API health (diagnostic)
+        continue-on-error: true
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('lib/main.dart', 'utf8');
+          const match = source.match(/const defaultApiBase = '([^']+)'/);
+          if (!match) { console.warn('Service health check skipped: configured endpoint was not found.'); process.exit(0); }
+          fetch(`${match[1]}/health`, { signal: AbortSignal.timeout(12000) })
+            .then(async response => {
+              if (!response.ok) throw new Error('health status not OK');
+              const payload = await response.json();
+              if (payload.status !== 'ok') throw new Error('health payload not OK');
+              console.log('Service health check passed.');
+            })
+            .catch(() => { console.warn('Service health check failed from the build runner (DNS/network/HTTP).'); process.exitCode = 1; });
+          NODE
       - name: Resolve packages
         run: flutter pub get
       - name: Analyze
