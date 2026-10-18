@@ -43,11 +43,11 @@ jobs:
           set -euo pipefail
           res="android/app/src/main/res"
           mkdir -p assets
-          curl -fsSL "https://raw.githubusercontent.com/CrazeStudio/AniSteam-2/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" -o assets/anisteam_logo.webp
+          base64 -d .github/assets/launcher/xxxhdpi-ic_launcher.b64 > assets/anisteam_logo.webp
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             mkdir -p "$res/mipmap-$density"
             for icon in ic_launcher ic_launcher_round; do
-              curl -fsSL "https://raw.githubusercontent.com/CrazeStudio/AniSteam-2/main/app/src/main/res/mipmap-$density/$icon.webp" -o "$res/mipmap-$density/$icon.webp"
+              base64 -d ".github/assets/launcher/$density-$icon.b64" > "$res/mipmap-$density/$icon.webp"
               rm -f "$res/mipmap-$density/$icon.png"
             done
           done
