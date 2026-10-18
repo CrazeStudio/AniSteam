@@ -19,5 +19,3 @@ dependency_overrides:
   shared_preferences_android: 2.4.10
 flutter:
   uses-material-design: true
-  assets:
-    - assets/anisteam_logo.webp
