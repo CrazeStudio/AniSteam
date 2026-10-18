@@ -37,6 +37,19 @@ jobs:
           cache-dependency-path: pubspec.yaml
       - name: Generate Android platform
         run: flutter create --platforms=android --org com.crazestudio --project-name anisteam --no-pub .
+      - name: Apply AniSteam-2 launcher logo
+        shell: bash
+        run: |
+          set -euo pipefail
+          res="android/app/src/main/res"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "$res/mipmap-$density"
+            for icon in ic_launcher ic_launcher_round; do
+              curl -fsSL "https://raw.githubusercontent.com/CrazeStudio/AniSteam-2/main/app/src/main/res/mipmap-$density/$icon.webp" -o "$res/mipmap-$density/$icon.webp"
+              rm -f "$res/mipmap-$density/$icon.png"
+            done
+          done
+          rm -f "$res"/mipmap-anydpi-v26/ic_launcher.xml "$res"/mipmap-anydpi-v26/ic_launcher_round.xml
       - name: Resolve packages
         run: flutter pub get
       - name: Analyze
