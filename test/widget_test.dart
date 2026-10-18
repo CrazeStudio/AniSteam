@@ -27,6 +27,7 @@ void main() {
     expect(find.text('API CONNECTION'), findsOneWidget);
     final urlField = find.byType(TextField).last;
     await tester.enterText(urlField, 'https://example-api.vercel.app');
+    await tester.scrollUntilVisible(find.text('Save URL'), 300, scrollable: find.byType(Scrollable).first);
     await tester.tap(find.text('Save URL'));
     await tester.pump(const Duration(milliseconds: 300));
 
