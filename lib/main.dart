@@ -406,22 +406,15 @@ class _WatchScreenState extends State<WatchScreen> {
   String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
   bool get _toonStreamOnly => (currentEpisode?.source ?? widget.episode.source).toLowerCase().contains('toonstream');
   List<StreamChoice> get _filteredStreams {
-    if (!_toonStreamOnly) return streams;
-    final list = streams.where((choice) {
-      final text = '${choice.title} ${choice.source} ${choice.url}'.toLowerCase();
-      switch (serverFilter) {
-        case 'Moly':
-          return text.contains('moly');
-        case 'Short':
-          return choice.isShortLink || text.contains('short') || text.contains('abyss');
-        case 'Play':
-          return choice.isDirect || text.contains('play') || text.contains('stream') || text.contains('video');
-        default:
-          return true;
-      }
-    }).toList();
-    // Keep the selector compact: at most three servers are shown per category.
-    return list.take(3).toList();
+    if (!_toonStreamOnly || serverFilter.trim().isEmpty) return streams;
+    final query = serverFilter.trim().toLowerCase();
+    return streams.where((choice) =>
+      choice.title.toLowerCase().contains(query) ||
+      choice.source.toLowerCase().contains(query) ||
+      choice.url.toLowerCase().contains(query) ||
+      (query == 'play' && (choice.isDirect || choice.playbackKind.toLowerCase().contains('player'))) ||
+      (query == 'short' && (choice.isShortLink || choice.title.toLowerCase().contains('abyss')))
+    ).toList();
   }
   bool get _hasPlaylist => widget.playlist.isNotEmpty;
   bool get _hasPrevious => _hasPlaylist && currentIndex > 0;
@@ -810,10 +803,11 @@ class _WatchScreenState extends State<WatchScreen> {
     }
 
     final useAbyssIframe = choice.url == 'https://player.abyssplayer.com/dqvi26UZ6';
-    const abyssIframeHtml = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe width="640" height="360" src="https://player.abyssplayer.com/dqvi26UZ6" frameborder="0" scrolling="0" allowfullscreen style="border:0;width:100vw;height:100vh;display:block"></iframe></body></html>';
+    final iframeSrc = choice.url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    final shortServerHtml = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe width="640" height="360" src="$iframeSrc" frameborder="0" scrolling="0" allowfullscreen style="border:0;width:100vw;height:100vh;display:block"></iframe></body></html>';
     return InAppWebView(
       key: _webViewKey,
-      initialData: useAbyssIframe ? InAppWebViewInitialData(data: abyssIframeHtml, baseUrl: WebUri('https://player.abyssplayer.com/')) : null,
+      initialData: useAbyssIframe ? InAppWebViewInitialData(data: shortServerHtml, baseUrl: WebUri(Uri.parse(choice.url).origin)) : null,
       initialUrlRequest: useAbyssIframe ? null : URLRequest(url: WebUri(choice.url)),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
@@ -1031,29 +1025,32 @@ class _WatchScreenState extends State<WatchScreen> {
                       ]),
                       if (streams.isEmpty)
                         const Text('No servers returned for this episode.', style: TextStyle(color: Color(0xFF9CA2B0)))
-                      else if (!_toonStreamOnly)
-                        SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: streams.take(3).map((choice) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(selected: choice.url == active?.url, label: Text(choice.title), avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17), onSelected: (_) => _selectStream(choice)))).toList()))
                       else ...[
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(children: ['All', 'Moly', 'Short', 'Play'].map((filter) =>
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ChoiceChip(
-                                selected: serverFilter == filter,
-                                label: Text(filter == 'All' ? 'All servers' : filter),
-                                onSelected: (_) => setState(() => serverFilter = filter),
+                        if (_toonStreamOnly) ...[
+                          TextField(
+                            key: const ValueKey('toonstream-server-filter'),
+                            onChanged: (value) => setState(() => serverFilter = value),
+                            decoration: InputDecoration(
+                              hintText: 'Filter servers by name, e.g. Moly, Short, Play',
+                              prefixIcon: const Icon(Icons.search_rounded),
+                              suffixIcon: serverFilter.isEmpty ? null : IconButton(
+                                tooltip: 'Clear server filter',
+                                onPressed: () => setState(() => serverFilter = ''),
+                                icon: const Icon(Icons.close_rounded),
                               ),
-                            )).toList()),
-                        ),
-                        const SizedBox(height: 10),
+                              isDense: true,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                         Builder(builder: (context) {
                           final visibleServers = _filteredStreams;
                           if (visibleServers.isEmpty) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              child: Text('No ${serverFilter == 'All' ? '' : '$serverFilter '}servers found. Try another filter.',
-                                style: const TextStyle(color: Color(0xFF9CA2B0))),
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 10),
+                              child: Text('No matching servers found. Try another server name.',
+                                style: TextStyle(color: Color(0xFF9CA2B0))),
                             );
                           }
                           return SingleChildScrollView(
