@@ -59,7 +59,7 @@ jobs:
           </resources>
           XML
           grep -q '<string name="app_name">AniSteam</string>' "$strings"
-          test -s android/app/src/main/res/mipmap-mdpi/ic_launcher.webp
+          test -s .github/assets/launcher/mdpi-ic_launcher.b64
 
       - name: Apply AniSteam-2 launcher logo
         shell: bash
