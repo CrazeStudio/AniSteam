@@ -93,6 +93,24 @@ jobs:
           NODE
       - name: Resolve packages
         run: flutter pub get
+      - name: Patch WebView Gradle compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t gradle_files < <(find "$HOME/.pub-cache/hosted/pub.dev" -path '*/flutter_inappwebview_android-*/android/build.gradle' -type f)
+          if [ "${#gradle_files[@]}" -eq 0 ]; then
+            echo "flutter_inappwebview Android Gradle file not found"
+            exit 1
+          fi
+          for file in "${gradle_files[@]}"; do
+            sed -i "s/proguard-android\.txt/proguard-android-optimize.txt/g" "$file"
+            if grep -q "proguard-android\.txt" "$file"; then
+              echo "Legacy ProGuard rules reference remains in $file"
+              exit 1
+            fi
+          done
+          echo "WebView Android Gradle compatibility patch applied."
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Test
