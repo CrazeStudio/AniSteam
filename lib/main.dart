@@ -894,19 +894,12 @@ class _WatchScreenState extends State<WatchScreen> {
         .replaceAll('>', '&gt;');
     final shortIframeHtml = '<!doctype html><html><head>'
         '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
-        '<meta name="referrer" content="no-referrer">'
-        '<style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}'
-        'iframe{border:0;width:100vw;height:100vh;display:block}</style>'
-        '<script>'
-        'window.open=function(){return null};'
-        'window.alert=function(){};window.confirm=function(){return false};'
-        'window.addEventListener("beforeunload",function(e){e.preventDefault();e.returnValue="";});'
-        '</script></head><body>'
-        '<iframe width="640" height="360" src="$escapedSrc" '
-        'sandbox="allow-scripts allow-same-origin allow-forms allow-presentation" '
-        'referrerpolicy="no-referrer" frameborder="0" scrolling="no" '
-        'allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>'
-        '</body></html>';
+        '<meta charset="utf-8">'
+        '<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}'
+        'iframe{border:0;width:100%;height:100%;display:block;background:#000}</style>'
+        '</head><body><iframe src="$escapedSrc" title="Short video player" '
+        'allow="autoplay; fullscreen; picture-in-picture; encrypted-media" '
+        'allowfullscreen frameborder="0" scrolling="no"></iframe></body></html>';
 
     return InAppWebView(
       key: _webViewKey,
