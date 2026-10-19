@@ -871,13 +871,15 @@ class _WatchScreenState extends State<WatchScreen> {
       );
     }
 
-    final useAbyssIframe = _toonStreamOnly && (choice.isShortLink || choice.title.toLowerCase().contains('short') || choice.title.toLowerCase().contains('abyss'));
-    final iframeSrc = choice.url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-    final shortServerHtml = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe width="640" height="360" src="$iframeSrc" frameborder="0" scrolling="0" allowfullscreen style="border:0;width:100vw;height:100vh;display:block"></iframe></body></html>';
+    final isShortPlayback = _toonStreamOnly &&
+        (choice.isShortLink || choice.title.toLowerCase().contains('short') ||
+         choice.title.toLowerCase().contains('abyss'));
     return InAppWebView(
       key: _webViewKey,
-      initialData: useAbyssIframe ? InAppWebViewInitialData(data: shortServerHtml, baseUrl: WebUri(Uri.parse(choice.url).origin)) : null,
-      initialUrlRequest: useAbyssIframe ? null : URLRequest(url: WebUri(choice.url)),
+      // Load Short/Abyss URLs as the WebView's top-level page. Wrapping a
+      // redirect URL in an iframe can strand its final player or trigger
+      // pop-up redirect behavior that the outer page cannot manage.
+      initialUrlRequest: URLRequest(url: WebUri(choice.url)),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         domStorageEnabled: true,
@@ -906,11 +908,26 @@ class _WatchScreenState extends State<WatchScreen> {
         final uri = action.request.url;
         if (uri == null) return NavigationActionPolicy.CANCEL;
         final scheme = uri.scheme.toLowerCase();
-        if (scheme != 'https' && scheme != 'http') return NavigationActionPolicy.CANCEL;
+
+        // Never allow a Short/Abyss click to launch another Android app,
+        // browser intent, market page, or custom URL scheme.
+        if (scheme != 'https' && scheme != 'http') {
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        // Short-link providers often navigate through intermediate hosts.
+        // Keep those redirects inside the WebView, but cancel known ad
+        // destinations at every frame level. Avoid external launch handlers.
         if (redirectBlockerEnabled && _isBlockedRedirectHost(uri.host)) {
           return NavigationActionPolicy.CANCEL;
         }
         return NavigationActionPolicy.ALLOW;
+      },
+      onCreateWindow: (web, action) async {
+        // Pop-up windows are a common source of redirect loops on short-link
+        // pages. Do not create a second WebView/window; keep navigation in
+        // the existing player only.
+        return false;
       },
       onReceivedError: (web, request, error) {
         if (request.isForMainFrame == true && mounted) {
