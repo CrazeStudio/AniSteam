@@ -724,6 +724,11 @@ class _WatchScreenState extends State<WatchScreen> {
     serverFilterController.dispose();
     try { unawaited(WakelockPlus.disable()); } catch (_) {}
     final old = controller;
+    final episode = currentEpisode;
+    if (old != null && episode != null && old.value.isInitialized &&
+        old.value.position > Duration.zero && old.value.position < old.value.duration * .92) {
+      unawaited(_saveProgress(episode, old.value.position));
+    }
     if (old != null) {
       old.removeListener(_onVideoTick);
       old.dispose();
