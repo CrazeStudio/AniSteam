@@ -47,6 +47,20 @@ jobs:
             sed -i '/<manifest\b/a\    <uses-permission android:name="android.permission.INTERNET" />' "$manifest"
           fi
           grep -q 'android.permission.INTERNET' "$manifest"
+      - name: Set Android launcher label
+        shell: bash
+        run: |
+          set -euo pipefail
+          strings="android/app/src/main/res/values/strings.xml"
+          mkdir -p "$(dirname "$strings")"
+          cat > "$strings" <<'XML'
+          <resources>
+              <string name="app_name">AniSteam</string>
+          </resources>
+          XML
+          grep -q '<string name="app_name">AniSteam</string>' "$strings"
+          test -s android/app/src/main/res/mipmap-mdpi/ic_launcher.webp
+
       - name: Apply AniSteam-2 launcher logo
         shell: bash
         run: |
