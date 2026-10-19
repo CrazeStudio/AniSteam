@@ -802,7 +802,7 @@ class _WatchScreenState extends State<WatchScreen> {
       );
     }
 
-    final useAbyssIframe = choice.url == 'https://player.abyssplayer.com/dqvi26UZ6';
+    final useAbyssIframe = _toonStreamOnly && (choice.isShortLink || choice.title.toLowerCase().contains('short') || choice.title.toLowerCase().contains('abyss'));
     final iframeSrc = choice.url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     final shortServerHtml = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe width="640" height="360" src="$iframeSrc" frameborder="0" scrolling="0" allowfullscreen style="border:0;width:100vw;height:100vh;display:block"></iframe></body></html>';
     return InAppWebView(
