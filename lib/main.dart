@@ -31,8 +31,8 @@ class AniSteamApp extends StatelessWidget {
 }
 
 class Anime {
-  const Anime({required this.title, required this.url, this.image = '', this.description = '', this.source = 'ToonStream'});
-  final String title, url, image, description, source;
+  const Anime({required this.title, required this.url, this.image = '', this.description = '', this.source = 'ToonStream', this.seriesTitle = ''});
+  final String title, url, image, description, source, seriesTitle;
   factory Anime.fromMap(Map<String, dynamic> m, {String fallbackSource = 'ToonStream'}) {
     String read(List<String> keys) {
       for (final k in keys) {
@@ -46,10 +46,11 @@ class Anime {
     final inferred = url.toLowerCase().contains('hianime') ? 'HiAnime' : fallbackSource;
     return Anime(title: read(['title','name','animeTitle','englishTitle','episodeTitle']).isEmpty ? 'Untitled' : read(['title','name','animeTitle','englishTitle','episodeTitle']),
       url: url, image: read(['image','poster','posterUrl','thumbnail','cover','img','imageUrl','poster_url']),
-      description: read(['description','synopsis','overview','summary']), source: inferred);
+      description: read(['description','synopsis','overview','summary']), source: inferred,
+      seriesTitle: read(['seriesTitle','series_title']));
   }
-  Map<String, dynamic> toJson() => {'title':title,'url':url,'image':image,'description':description,'source':source};
-  factory Anime.fromJson(Map<String,dynamic> m) => Anime(title:(m['title']??'Untitled').toString(),url:(m['url']??'').toString(),image:(m['image']??'').toString(),description:(m['description']??'').toString(),source:(m['source']??'ToonStream').toString());
+  Map<String, dynamic> toJson() => {'title':title,'url':url,'image':image,'description':description,'source':source,'seriesTitle':seriesTitle};
+  factory Anime.fromJson(Map<String,dynamic> m) => Anime(title:(m['title']??'Untitled').toString(),url:(m['url']??'').toString(),image:(m['image']??'').toString(),description:(m['description']??'').toString(),source:(m['source']??'ToonStream').toString(),seriesTitle:(m['seriesTitle']??m['series_title']??'').toString());
 }
 
 class AniApi {
@@ -84,7 +85,35 @@ class AniApi {
     return maps(data).map((m)=>Anime.fromMap(m,fallbackSource:source))
       .where((a)=>a.url.startsWith('http')&&seen.add(a.url)).toList();
   }
-  static Future<List<Anime>> catalogue() async => parse(await get('/catalogue', {'page':'1'}));
+  static const String _catalogueCacheKey = 'anisteam_catalogue_cache_v1';
+
+  static Future<List<Anime>> catalogue() async {
+    final prefs = await SharedPreferences.getInstance();
+    List<Anime> cached = [];
+    final rawCache = prefs.getString(_catalogueCacheKey);
+    if (rawCache != null) {
+      try {
+        cached = (jsonDecode(rawCache) as List)
+            .whereType<Map>()
+            .map((item) => Anime.fromJson(Map<String, dynamic>.from(item)))
+            .where((item) => item.url.startsWith('http'))
+            .toList();
+      } catch (_) {
+        cached = [];
+      }
+    }
+    try {
+      final fresh = parse(await get('/catalogue', {'page':'1'}));
+      if (fresh.isNotEmpty) {
+        await prefs.setString(_catalogueCacheKey,
+          jsonEncode(fresh.take(100).map((anime) => anime.toJson()).toList()));
+      }
+      return fresh.isNotEmpty ? fresh : cached;
+    } catch (_) {
+      if (cached.isNotEmpty) return cached;
+      rethrow;
+    }
+  }
   static Future<List<Anime>> search(String query, String mode) async {
     final collected=<Anime>[];
     Future<void> fetch(String source,String path,Map<String,String> params) async {
@@ -326,9 +355,9 @@ class _AppShellState extends State<AppShell> {
   Future<void> clearHistory() async {history.clear();final p=await SharedPreferences.getInstance();await p.remove(historyKey);if(mounted)setState((){});}
   @override Widget build(BuildContext context){
     final pages=[
-      HomeTab(sourceMode:sourceMode,onOpen:(a)=>openDetails(a)),
+      HomeTab(sourceMode:sourceMode,history:history,onOpen:(a)=>openDetails(a),onContinue:resumeFromHistory),
       SearchTab(sourceMode:sourceMode,onOpen:(a)=>openDetails(a)),
-      HistoryTab(items:history,onClear:clearHistory,onOpen:(a)=>openDetails(a)),
+      HistoryTab(items:history,onClear:clearHistory,onOpen:resumeFromHistory),
       SettingsTab(sourceMode:sourceMode,onMode:setMode),
     ];
     return Scaffold(body:IndexedStack(index:tab,children:pages),
@@ -337,9 +366,26 @@ class _AppShellState extends State<AppShell> {
     );
   }
   Future<void> openDetails(Anime anime) async {await Navigator.push(context,MaterialPageRoute(builder:(_)=>DetailsScreen(anime:anime,onWatch:addHistory)));if(mounted)setState((){});}
+
+  Future<void> resumeFromHistory(Anime item) async {
+    final seriesTitle = item.seriesTitle.isNotEmpty ? item.seriesTitle : item.title;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => WatchScreen(
+      episode: item,
+      animeTitle: seriesTitle,
+      onEpisodeChanged: (episode) => addHistory(Anime(
+        title: episode.title,
+        url: episode.url,
+        image: item.image,
+        description: item.description,
+        source: episode.source,
+        seriesTitle: seriesTitle,
+      )),
+    )));
+    if (mounted) setState(() {});
+  }
 }
 
-class HomeTab extends StatefulWidget {const HomeTab({super.key,required this.sourceMode,required this.onOpen});final String sourceMode;final ValueChanged<Anime> onOpen;@override State<HomeTab> createState()=>_HomeTabState();}
+class HomeTab extends StatefulWidget {const HomeTab({super.key,required this.sourceMode,required this.history,required this.onOpen,required this.onContinue});final String sourceMode;final List<Anime> history;final ValueChanged<Anime> onOpen;final ValueChanged<Anime> onContinue;@override State<HomeTab> createState()=>_HomeTabState();}
 class _HomeTabState extends State<HomeTab>{
  late Future<List<Anime>> future=AniApi.catalogue();
  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Brand(),actions:[IconButton(onPressed:()=>setState(()=>future=AniApi.catalogue()),icon:const Icon(Icons.refresh_rounded))]),
@@ -353,9 +399,76 @@ class _HomeTabState extends State<HomeTab>{
     const SizedBox(height:20),
     const Row(children:[Icon(Icons.auto_awesome_rounded,color:lime),SizedBox(width:8),Text('Explore catalogue',style:TextStyle(fontSize:17,fontWeight:FontWeight.w800))])
    ]))),
+   if(widget.history.isNotEmpty) SliverToBoxAdapter(
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Continue watching', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 188,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: widget.history.take(12).length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              final item = widget.history[i];
+              return _ContinueWatchingCard(item: item, onTap: () => widget.onContinue(item));
+            },
+          ),
+        ),
+      ]),
+    ),
+   ),
+   SliverToBoxAdapter(child: Padding(
+     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+     child: const Text('Explore catalogue', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+   )),
    SliverPadding(padding:const EdgeInsets.fromLTRB(16,0,16,24),sliver:SliverGrid(delegate:SliverChildBuilderDelegate((context,i)=>AnimeCard(anime:list[i],onTap:()=>widget.onOpen(list[i])),childCount:list.length),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:2,mainAxisSpacing:15,crossAxisSpacing:13,childAspectRatio:.59)))
   ]));
   }));}
+class _ContinueWatchingCard extends StatelessWidget {
+  const _ContinueWatchingCard({required this.item, required this.onTap});
+  final Anime item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = item.seriesTitle.isNotEmpty ? item.seriesTitle : item.title;
+    final imageWidth = (142 * MediaQuery.devicePixelRatioOf(context)).round().clamp(180, 420).toInt();
+    return SizedBox(
+      width: 142,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: ClipRRect(
+            borderRadius: BorderRadius.circular(15),
+            child: Stack(fit: StackFit.expand, children: [
+              if (item.image.isNotEmpty)
+                Image.network(item.image, cacheWidth: imageWidth, fit: BoxFit.cover,
+                  gaplessPlayback: true, filterQuality: FilterQuality.low,
+                  errorBuilder: (_, __, ___) => const PosterPlaceholder())
+              else const PosterPlaceholder(),
+              Positioned(right: 8, bottom: 8, child: Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(color: lime, borderRadius: BorderRadius.circular(20)),
+                child: const Icon(Icons.play_arrow_rounded, color: Color(0xFF11140D), size: 20),
+              )),
+            ]),
+          )),
+          const SizedBox(height: 8),
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+          Text(item.title == title ? item.source : item.title, maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10, color: Color(0xFF9CA2B0))),
+        ]),
+      ),
+    );
+  }
+}
+
 class _HomeHero extends StatelessWidget {
   const _HomeHero({required this.sourceMode});
   final String sourceMode;
@@ -439,7 +552,18 @@ class _DetailsScreenState extends State<DetailsScreen>{
  const SizedBox(height:18),Text(widget.anime.title,style:const TextStyle(fontSize:26,fontWeight:FontWeight.w900)),const SizedBox(height:8),Text(widget.anime.source,style:const TextStyle(color:lime,fontWeight:FontWeight.w800,letterSpacing:1)),
  const SizedBox(height:12),FutureBuilder<dynamic>(future:details,builder:(context,snap){final d=widget.anime.description.isNotEmpty?widget.anime.description:findDescription(snap.data);return Text(d.isEmpty?'Choose an episode below to continue.':d,style:const TextStyle(color:Color(0xFFB0B5C1),height:1.5));}),
  const SizedBox(height:24),const Text('EPISODES',style:TextStyle(fontWeight:FontWeight.w900,letterSpacing:1.5)),const SizedBox(height:10),
- FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){widget.onWatch(e.value);Navigator.push(context,MaterialPageRoute(builder:(_)=>WatchScreen(episode:e.value,playlist:list,startIndex:e.key,animeTitle:widget.anime.title)));}))).toList());})
+ FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){
+  void recordEpisode(Anime item) => widget.onWatch(Anime(
+    title: item.title, url: item.url, image: widget.anime.image,
+    description: widget.anime.description, source: item.source,
+    seriesTitle: widget.anime.title,
+  ));
+  recordEpisode(e.value);
+  Navigator.push(context,MaterialPageRoute(builder:(_)=>WatchScreen(
+    episode:e.value,playlist:list,startIndex:e.key,animeTitle:widget.anime.title,
+    onEpisodeChanged:recordEpisode,
+  )));
+}))).toList());})
  ]));}
 class WatchScreen extends StatefulWidget {
   const WatchScreen({
@@ -1329,7 +1453,39 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 }
 
-class HistoryTab extends StatelessWidget {const HistoryTab({super.key,required this.items,required this.onClear,required this.onOpen});final List<Anime> items;final VoidCallback onClear;final ValueChanged<Anime> onOpen;@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Watch history',style:TextStyle(fontWeight:FontWeight.w900)),actions:[IconButton(onPressed:items.isEmpty?null:onClear,icon:const Icon(Icons.delete_sweep_rounded))]),body:items.isEmpty?const EmptyView(title:'Nothing watched yet',message:'Episodes you open will be saved here on this device.'):ListView.builder(itemCount:items.length,itemBuilder:(context,i){final a=items[i];return ListTile(leading:const Icon(Icons.history_rounded,color:lime),title:Text(a.title,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(a.source),trailing:const Icon(Icons.chevron_right_rounded),onTap:()=>onOpen(a));}));}
+class HistoryTab extends StatelessWidget {
+  const HistoryTab({super.key, required this.items, required this.onClear, required this.onOpen});
+  final List<Anime> items;
+  final VoidCallback onClear;
+  final ValueChanged<Anime> onOpen;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('Watch history', style: TextStyle(fontWeight: FontWeight.w900)),
+      actions: [IconButton(onPressed: items.isEmpty ? null : onClear, icon: const Icon(Icons.delete_sweep_rounded))],
+    ),
+    body: items.isEmpty
+      ? const EmptyView(title: 'Nothing watched yet', message: 'Episodes you open will be saved here on this device.')
+      : ListView.separated(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+          itemBuilder: (context, i) {
+            final item = items[i];
+            final seriesTitle = item.seriesTitle.isNotEmpty ? item.seriesTitle : item.title;
+            return ListTile(
+              leading: const Icon(Icons.play_circle_outline_rounded, color: lime, size: 30),
+              title: Text(seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(item.seriesTitle.isNotEmpty ? item.title + ' · ' + item.source : item.source,
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => onOpen(item),
+            );
+          },
+        ),
+  );
+}
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key, required this.sourceMode, required this.onMode});
   final String sourceMode;
@@ -1484,7 +1640,40 @@ class Brand extends StatelessWidget {
     const Text('AniSteam', style: TextStyle(fontWeight: FontWeight.w900)),
   ]);
 }
-class AnimeCard extends StatelessWidget {const AnimeCard({super.key,required this.anime,required this.onTap});final Anime anime;final VoidCallback onTap;@override Widget build(BuildContext context)=>InkWell(onTap:onTap,borderRadius:BorderRadius.circular(18),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(17),child:Stack(fit:StackFit.expand,children:[if(anime.image.isNotEmpty)Image.network(anime.image,fit:BoxFit.cover,errorBuilder:(_,__,___)=>const PosterPlaceholder())else const PosterPlaceholder(),const Positioned(right:10,top:10,child:Icon(Icons.play_circle_fill_rounded,color:lime,size:27))]))),const SizedBox(height:9),Text(anime.title,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:13)),const SizedBox(height:4),Text(anime.source.toUpperCase(),style:const TextStyle(color:Color(0xFF9CA2B0),fontSize:9,letterSpacing:1.1))]));}
+class AnimeCard extends StatelessWidget {
+  const AnimeCard({super.key, required this.anime, required this.onTap});
+  final Anime anime;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cacheWidth = (MediaQuery.sizeOf(context).width * .5 *
+      MediaQuery.devicePixelRatioOf(context)).round().clamp(240, 640).toInt();
+    return InkWell(
+      onTap: onTap, borderRadius: BorderRadius.circular(18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: ClipRRect(
+          borderRadius: BorderRadius.circular(17),
+          child: Stack(fit: StackFit.expand, children: [
+            if (anime.image.isNotEmpty)
+              Image.network(anime.image, cacheWidth: cacheWidth, fit: BoxFit.cover,
+                gaplessPlayback: true, filterQuality: FilterQuality.low,
+                errorBuilder: (_, __, ___) => const PosterPlaceholder())
+            else const PosterPlaceholder(),
+            const Positioned(right: 10, top: 10,
+              child: Icon(Icons.play_circle_fill_rounded, color: lime, size: 27)),
+          ]),
+        )),
+        const SizedBox(height: 9),
+        Text(anime.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+        const SizedBox(height: 4),
+        Text(anime.source.toUpperCase(),
+            style: const TextStyle(color: Color(0xFF9CA2B0), fontSize: 9, letterSpacing: 1.1)),
+      ]),
+    );
+  }
+}
 class PosterPlaceholder extends StatelessWidget {const PosterPlaceholder({super.key});@override Widget build(BuildContext context)=>Container(color:const Color(0xFF1B202B),child:const Center(child:Icon(Icons.movie_outlined,color:Color(0xFF6F7787),size:45)));}
 class ErrorView extends StatelessWidget {const ErrorView({super.key,required this.message,required this.retry});final String message;final VoidCallback retry;@override Widget build(BuildContext context){final networkFailure=message.contains('Failed host lookup')||message.contains('SocketException')||message.contains('No address associated with hostname');final shown=networkFailure?'AniSteam could not reach its service. Check your internet connection and try again in a moment.':message;return Center(child:Padding(padding:const EdgeInsets.all(22),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.cloud_off_rounded,size:40,color:Color(0xFFFFB86B)),const SizedBox(height:12),const Text('Could not load data',style:TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(shown,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0))),const SizedBox(height:14),OutlinedButton.icon(onPressed:retry,icon:const Icon(Icons.refresh_rounded),label:const Text('Try again'))])));}}
 class EmptyView extends StatelessWidget {const EmptyView({super.key,required this.title,required this.message});final String title,message;@override Widget build(BuildContext context)=>Center(child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.video_library_outlined,size:43,color:Color(0xFF858B99)),const SizedBox(height:12),Text(title,textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w900)),const SizedBox(height:7),Text(message,textAlign:TextAlign.center,style:const TextStyle(color:Color(0xFF9CA2B0),height:1.4))])));}
