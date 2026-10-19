@@ -1145,7 +1145,7 @@ class _WatchScreenState extends State<WatchScreen> {
     if (selected.title == '__refresh__') {
       await _refreshServers();
     } else {
-      await _selectStream(selected);
+      await _selectStream(selected, userInitiated: true);
     }
   }
 
@@ -1263,6 +1263,9 @@ class _WatchScreenState extends State<WatchScreen> {
       },
       onLoadStop: (web, url) {
         if (mounted) setState(() => webLoading = false);
+        if (!useShortIframe && active?.url == choice.url) {
+          unawaited(_saveLastServer(currentEpisode ?? widget.episode, choice));
+        }
       },
       shouldOverrideUrlLoading: (web, action) async {
         final uri = action.request.url;
@@ -1300,8 +1303,9 @@ class _WatchScreenState extends State<WatchScreen> {
         if (request.isForMainFrame == true && mounted) {
           setState(() {
             webLoading = false;
-            errorMessage = 'This embedded server could not load. Try another server or open it externally.';
+            errorMessage = 'This embedded server failed. Trying another available server…';
           });
+          unawaited(_handleCurrentServerFailure());
         }
       },
       onEnterFullscreen: (web) async {
