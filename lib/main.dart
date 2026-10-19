@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -102,18 +105,175 @@ class AniApi {
     return parse(await get('/$source/episodes',{'url':anime.url}),source:anime.source)
       .asMap().entries.map((e)=>Anime(title:e.value.title=='Untitled'?'Episode ${e.key+1}':e.value.title,url:e.value.url,image:e.value.image,source:anime.source)).toList();
   }
-  static Future<List<Anime>> streams(Anime episode) async {
-    final data=await get('/watch',{'url':episode.url});final out=<Anime>[];
-    void walk(dynamic v,[String label='Stream']){
-      if(v is String && (v.startsWith('https://')||v.startsWith('http://'))){out.add(Anime(title:label,url:v,source:episode.source));}
-      else if(v is Map){
-        final m=Map<String,dynamic>.from(v);final u=(m['url']??m['src']??m['file']??m['link']??'').toString();
-        if(u.startsWith('https://')||u.startsWith('http://'))out.add(Anime(title:(m['name']??m['label']??m['quality']??label).toString(),url:u,source:episode.source));
-        else{for(final e in m.entries){walk(e.value,e.key);}}
-      }else if(v is List){for(var i=0;i<v.length;i++){walk(v[i],label=='Stream'?'Stream ${i+1}':label);}}
-    }
-    walk(data);final seen=<String>{};return out.where((a)=>seen.add(a.url)).toList();
+  static bool isDirectUrl(String url) {
+    final lower = url.toLowerCase();
+    final clean = lower.split('?').first.split('#').first;
+    return clean.endsWith('.mp4') ||
+        clean.endsWith('.m3u8') ||
+        clean.endsWith('.webm') ||
+        clean.endsWith('.mkv') ||
+        lower.contains('.m3u8?') ||
+        lower.contains('.mp4?') ||
+        lower.contains('/hls/');
   }
+
+  static Future<List<StreamChoice>> streams(Anime episode) async {
+    final source = episode.source.toLowerCase();
+    final endpoints = <(String, Map<String, String>)>[];
+    final query = <String, String>{'url': episode.url};
+    if (source.contains('hianime')) {
+      endpoints.add(('/hianime/streams', {...query, 'resolve': 'true'}));
+      endpoints.add(('/api/stream', query));
+      endpoints.add(('/watch', query));
+    } else if (source.contains('toonstream')) {
+      endpoints.add(('/toonstream/streams', {...query, 'resolve': 'true'}));
+      endpoints.add(('/watch', query));
+    } else {
+      endpoints.add(('/watch', query));
+      endpoints.add(('/animesalt/streams', {...query, 'resolve': 'true'}));
+    }
+
+    for (final endpoint in endpoints) {
+      try {
+        final raw = await get(endpoint.$1, endpoint.$2);
+        final choices = _parseStreams(raw, episode.source);
+        if (choices.isNotEmpty) return choices;
+      } catch (_) {
+        // Use the next compatible extractor. The page still reports a single
+        // useful error if every supported extractor fails.
+      }
+    }
+    throw Exception('No playable servers were returned for this episode.');
+  }
+
+  static List<StreamChoice> _parseStreams(dynamic raw, String fallbackSource) {
+    final out = <StreamChoice>[];
+    final seen = <String>{};
+    final excluded = {'poster', 'poster_image', 'image', 'thumbnail', 'thumbnail_image', 'cover', 'description'};
+    const urlKeys = ['url', 'link', 'src', 'file', 'embed_url', 'embed', 'stream_url', 'streamUrl'];
+    String textValue(dynamic value) {
+      if (value == null) return '';
+      if (value is String || value is num) return value.toString().trim();
+      return '';
+    }
+    bool isWebUrl(String value) => value.startsWith('https://') || value.startsWith('http://');
+
+    void add(String url, String title, String type, String language) {
+      if (!isWebUrl(url) || !seen.add(url)) return;
+      final direct = isDirectUrl(url) || type.toLowerCase() == 'direct';
+      out.add(StreamChoice(
+        title: title.trim().isEmpty ? (direct ? 'Direct stream' : 'Web player ' + (out.length + 1).toString()) : title.trim(),
+        url: url,
+        source: fallbackSource,
+        type: direct ? 'direct' : 'embed',
+        language: language.trim().isEmpty ? 'Default' : language.trim(),
+      ));
+    }
+
+    void walk(dynamic node, {String label = 'Server', String typeHint = 'embed', String contextKey = '', int depth = 0}) {
+      if (depth > 10 || node == null) return;
+      if (node is List) {
+        for (var i = 0; i < node.length; i++) {
+          walk(node[i],
+              label: label == 'Server' ? 'Server ' + (i + 1).toString() : label,
+              typeHint: typeHint,
+              contextKey: contextKey,
+              depth: depth + 1);
+        }
+        return;
+      }
+      if (node is Map) {
+        final map = Map<String, dynamic>.from(node);
+        String url = '';
+        for (final key in urlKeys) {
+          final candidate = textValue(map[key]);
+          if (isWebUrl(candidate)) { url = candidate; break; }
+        }
+        if (url.isNotEmpty) {
+          final title = [
+            textValue(map['server']),
+            textValue(map['name']),
+            textValue(map['label']),
+            textValue(map['title']),
+            textValue(map['quality']),
+          ].firstWhere((x) => x.isNotEmpty, orElse: () => label);
+          final type = textValue(map['type']).isNotEmpty
+              ? textValue(map['type'])
+              : (contextKey.toLowerCase().contains('direct') ? 'direct' : typeHint);
+          final language = textValue(map['language']).isNotEmpty
+              ? textValue(map['language'])
+              : textValue(map['lang']);
+          add(url, title, type, language);
+          return;
+        }
+        for (final entry in map.entries) {
+          final key = entry.key.toString();
+          final lowerKey = key.toLowerCase();
+          if (excluded.contains(lowerKey)) continue;
+          final looksLikeStreamContainer = lowerKey.contains('stream') ||
+              lowerKey.contains('player') ||
+              lowerKey.contains('embed') ||
+              lowerKey.contains('server') ||
+              lowerKey == 'results' ||
+              lowerKey == 'players' ||
+              lowerKey == 'data' ||
+              lowerKey == 'result';
+          final nextType = lowerKey.contains('direct') ? 'direct' : typeHint;
+          final child = entry.value;
+          if (child is String && isWebUrl(child.trim())) {
+            if (looksLikeStreamContainer) add(child.trim(), key, nextType, '');
+          } else if (child is List || child is Map) {
+            walk(child,
+                label: key.replaceAll('_', ' '),
+                typeHint: nextType,
+                contextKey: lowerKey,
+                depth: depth + 1);
+          }
+        }
+        return;
+      }
+      if (node is String && isWebUrl(node.trim()) &&
+          (contextKey.contains('stream') || contextKey.contains('player') ||
+           contextKey.contains('embed') || contextKey.contains('server') ||
+           contextKey.contains('direct') || contextKey == 'results')) {
+        add(node.trim(), label, typeHint, '');
+      }
+    }
+
+    dynamic payload = raw;
+    if (payload is Map) {
+      payload = payload['data'] ?? payload['result'] ?? payload;
+    }
+    walk(payload);
+    out.sort((a, b) => (b.isDirect ? 1 : 0).compareTo(a.isDirect ? 1 : 0));
+    return out;
+  }
+}
+
+class StreamChoice {
+  const StreamChoice({
+    required this.title,
+    required this.url,
+    this.source = 'AniSteam',
+    this.type = 'embed',
+    this.language = 'Default',
+  });
+  final String title;
+  final String url;
+  final String source;
+  final String type;
+  final String language;
+  bool get isDirect => type == 'direct' || AniApi.isDirectUrl(url);
+
+  bool get isShortLink {
+    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+    return const {
+      'bit.ly', 'tinyurl.com', 'tiny.one', 'cutt.ly', 't.co',
+      'is.gd', 'rb.gy', 'shorturl.at', 'ouo.io', 'ouo.press',
+    }.contains(host);
+  }
+
+  String get playbackKind => isDirect ? 'Direct video' : (isShortLink ? 'Short-link web player' : 'Embedded web player');
 }
 
 class AppShell extends StatefulWidget { const AppShell({super.key}); @override State<AppShell> createState()=>_AppShellState(); }
@@ -184,16 +344,680 @@ class _DetailsScreenState extends State<DetailsScreen>{
  const SizedBox(height:18),Text(widget.anime.title,style:const TextStyle(fontSize:26,fontWeight:FontWeight.w900)),const SizedBox(height:8),Text(widget.anime.source,style:const TextStyle(color:lime,fontWeight:FontWeight.w800,letterSpacing:1)),
  const SizedBox(height:12),FutureBuilder<dynamic>(future:details,builder:(context,snap){final d=widget.anime.description.isNotEmpty?widget.anime.description:findDescription(snap.data);return Text(d.isEmpty?'Choose an episode below to continue.':d,style:const TextStyle(color:Color(0xFFB0B5C1),height:1.5));}),
  const SizedBox(height:24),const Text('EPISODES',style:TextStyle(fontWeight:FontWeight.w900,letterSpacing:1.5)),const SizedBox(height:10),
- FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){widget.onWatch(e.value);Navigator.push(context,MaterialPageRoute(builder:(_)=>WatchScreen(episode:e.value)));}))).toList());})
- ]));}
-class WatchScreen extends StatefulWidget {const WatchScreen({super.key,required this.episode});final Anime episode;@override State<WatchScreen> createState()=>_WatchScreenState();}
-class _WatchScreenState extends State<WatchScreen>{
- late Future<List<Anime>> future=AniApi.streams(widget.episode);
- bool direct(String u){final p=u.toLowerCase().split('?').first;return p.endsWith('.mp4')||p.endsWith('.m3u8')||p.endsWith('.webm')||p.endsWith('.mkv');}
- Future<void> open(Anime a) async {if(direct(a.url)){if(mounted)Navigator.push(context,MaterialPageRoute(builder:(_)=>MediaScreen(stream:a)));return;}final uri=Uri.tryParse(a.url);if(uri==null||!['http','https'].contains(uri.scheme))return;final ok=await launchUrl(uri,mode:LaunchMode.externalApplication);if(!ok&&mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Could not open player link.')));}
- @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Choose a stream')),body:FutureBuilder<List<Anime>>(future:future,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Center(child:CircularProgressIndicator());if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>future=AniApi.streams(widget.episode)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No playable links',message:'The API did not return a stream for this episode.');return ListView(padding:const EdgeInsets.all(16),children:[Text(widget.episode.title,style:const TextStyle(fontSize:22,fontWeight:FontWeight.w900)),const SizedBox(height:8),const Text('External player pages open outside AniSteam.',style:TextStyle(color:Color(0xFF9CA2B0))),const SizedBox(height:16),...list.asMap().entries.map((e)=>Card(child:ListTile(leading:const Icon(Icons.play_circle_fill_rounded,color:lime,size:30),title:Text(e.value.title.isEmpty?'Stream ${e.key+1}':e.value.title),subtitle:Text(direct(e.value.url)?'Direct media':'External player'),trailing:const Icon(Icons.open_in_new_rounded),onTap:()=>open(e.value))))]);}));}
-class MediaScreen extends StatefulWidget {const MediaScreen({super.key,required this.stream});final Anime stream;@override State<MediaScreen> createState()=>_MediaScreenState();}
-class _MediaScreenState extends State<MediaScreen>{VideoPlayerController? controller;Object? error;@override void initState(){super.initState();init();}Future<void> init()async{try{final c=VideoPlayerController.networkUrl(Uri.parse(widget.stream.url));controller=c;await c.initialize();if(mounted)setState((){});}catch(e){if(mounted)setState(()=>error=e);}}@override void dispose(){controller?.dispose();super.dispose();}@override Widget build(BuildContext context){final c=controller;return Scaffold(appBar:AppBar(title:Text(widget.stream.title,maxLines:1,overflow:TextOverflow.ellipsis)),body:Center(child:error!=null?Padding(padding:const EdgeInsets.all(24),child:Text('Playback unavailable: $error')):c==null||!c.value.isInitialized?const CircularProgressIndicator():Column(mainAxisAlignment:MainAxisAlignment.center,children:[AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)),const SizedBox(height:18),IconButton.filledTonal(iconSize:34,onPressed:()=>setState(()=>c.value.isPlaying?c.pause():c.play()),icon:Icon(c.value.isPlaying?Icons.pause_rounded:Icons.play_arrow_rounded)),VideoProgressIndicator(c,allowScrubbing:true)])));}}
+ FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){widget.onWatch(e.value);Navigator.push(context,MaterialPageRoute(builclass WatchScreen extends StatefulWidget {
+  const WatchScreen({
+    super.key,
+    required this.episode,
+    this.playlist = const [],
+    this.startIndex = 0,
+    this.animeTitle = '',
+  });
+  final Anime episode;
+  final List<Anime> playlist;
+  final int startIndex;
+  final String animeTitle;
+  @override State<WatchScreen> createState() => _WatchScreenState();
+}
+
+class _WatchScreenState extends State<WatchScreen> {
+  Anime? currentEpisode;
+  int currentIndex = 0;
+  List<StreamChoice> streams = [];
+  StreamChoice? active;
+  VideoPlayerController? controller;
+  InAppWebViewController? webController;
+  bool loadingStreams = true;
+  bool loadingPlayer = false;
+  bool webLoading = false;
+  bool fullscreen = false;
+  bool locked = false;
+  bool showControls = true;
+  bool externalBusy = false;
+  double speed = 1.0;
+  Duration position = Duration.zero;
+  Duration duration = Duration.zero;
+  String? errorMessage;
+  Timer? hideTimer;
+  bool _episodeEndedHandled = false;
+
+  String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
+  bool get _hasPlaylist => widget.playlist.isNotEmpty;
+  bool get _hasPrevious => _hasPlaylist && currentIndex > 0;
+  bool get _hasNext => _hasPlaylist && currentIndex < widget.playlist.length - 1;
+
+  @override void initState() {
+    super.initState();
+    currentEpisode = widget.episode;
+    currentIndex = widget.startIndex;
+    _loadEpisode(widget.episode, index: widget.startIndex);
+  }
+
+  @override void dispose() {
+    hideTimer?.cancel();
+    final old = controller;
+    if (old != null) {
+      old.removeListener(_onVideoTick);
+      old.dispose();
+    }
+    SystemChrome.setPreferredOrientations([]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  Future<void> _loadEpisode(Anime episode, {int? index}) async {
+    hideTimer?.cancel();
+    final old = controller;
+    controller = null;
+    if (old != null) {
+      old.removeListener(_onVideoTick);
+      await old.dispose();
+    }
+    if (!mounted) return;
+    setState(() {
+      currentEpisode = episode;
+      if (index != null) currentIndex = index;
+      streams = [];
+      active = null;
+      webController = null;
+      loadingStreams = true;
+      loadingPlayer = false;
+      webLoading = false;
+      errorMessage = null;
+      position = Duration.zero;
+      duration = Duration.zero;
+      _episodeEndedHandled = false;
+      showControls = true;
+    });
+    try {
+      final result = await AniApi.streams(episode);
+      if (!mounted) return;
+      setState(() {
+        streams = result;
+        loadingStreams = false;
+      });
+      if (result.isEmpty) {
+        setState(() => errorMessage = 'No playable servers were found for this episode.');
+        return;
+      }
+      final preferred = result.firstWhere((item) => item.isDirect, orElse: () => result.first);
+      await _selectStream(preferred);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          loadingStreams = false;
+          loadingPlayer = false;
+          errorMessage = 'AniSteam could not find a playable server for this episode. Try refreshing the server list.';
+        });
+      }
+    }
+  }
+
+  Future<void> _selectStream(StreamChoice choice) async {
+    final old = controller;
+    controller = null;
+    if (old != null) {
+      old.removeListener(_onVideoTick);
+      await old.dispose();
+    }
+    webController = null;
+    if (!mounted) return;
+    setState(() {
+      active = choice;
+      loadingPlayer = choice.isDirect;
+      webLoading = !choice.isDirect;
+      errorMessage = null;
+      position = Duration.zero;
+      duration = Duration.zero;
+      showControls = true;
+      _episodeEndedHandled = false;
+    });
+
+    if (!choice.isDirect) {
+      _scheduleHide();
+      return;
+    }
+
+    try {
+      final uri = Uri.tryParse(choice.url);
+      if (uri == null || !uri.hasScheme || (uri.scheme != 'https' && uri.scheme != 'http')) {
+        throw Exception('Invalid media URL');
+      }
+      final next = VideoPlayerController.networkUrl(uri);
+      controller = next;
+      await next.initialize();
+      if (!mounted || controller != next) {
+        await next.dispose();
+        return;
+      }
+      next.addListener(_onVideoTick);
+      await next.setPlaybackSpeed(speed);
+      await next.play();
+      setState(() => loadingPlayer = false);
+      _scheduleHide();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          loadingPlayer = false;
+          errorMessage = 'This direct stream could not be played in AniSteam. Try another server or open it in an external player.';
+        });
+      }
+    }
+  }
+
+  void _onVideoTick() {
+    final c = controller;
+    if (!mounted || c == null || !c.value.isInitialized) return;
+    final value = c.value;
+    if (value.hasError) {
+      if (errorMessage == null) {
+        setState(() => errorMessage = 'Playback failed for this server. Choose another server or open it externally.');
+      }
+      return;
+    }
+    final ended = value.position >= value.duration && value.duration > Duration.zero;
+    setState(() {
+      position = value.position;
+      duration = value.duration;
+    });
+    if (ended && !_episodeEndedHandled) {
+      _episodeEndedHandled = true;
+      if (_hasNext) _playEpisode(currentIndex + 1);
+    }
+  }
+
+  Future<void> _playEpisode(int index) async {
+    if (!_hasPlaylist || index < 0 || index >= widget.playlist.length) return;
+    await _loadEpisode(widget.playlist[index], index: index);
+  }
+
+  Future<void> _refreshServers() async {
+    final episode = currentEpisode;
+    if (episode == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing available servers…')));
+    await _loadEpisode(episode, index: currentIndex);
+  }
+
+  Future<void> _openExternal() async {
+    final choice = active;
+    if (choice == null || externalBusy) return;
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Open external player?'),
+        content: const Text('AniSteam will hand this server link to Android so a compatible browser or video player can open it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Open')),
+        ],
+      ),
+    );
+    if (shouldOpen != true || !mounted) return;
+    setState(() => externalBusy = true);
+    try {
+      final uri = Uri.parse(choice.url);
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No compatible external app could open this link.')));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the external player.')));
+    } finally {
+      if (mounted) setState(() => externalBusy = false);
+    }
+  }
+
+  Future<void> _toggleFullscreen() async {
+    if (fullscreen) {
+      await _leaveFullscreen();
+    } else {
+      await _enterFullscreen();
+    }
+  }
+
+  Future<void> _enterFullscreen() async {
+    if (!mounted || fullscreen) return;
+    setState(() { fullscreen = true; showControls = true; });
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _scheduleHide();
+  }
+
+  Future<void> _leaveFullscreen() async {
+    if (!mounted || !fullscreen) return;
+    setState(() { fullscreen = false; showControls = true; });
+    await SystemChrome.setPreferredOrientations([]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _scheduleHide();
+  }
+
+  void _scheduleHide() {
+    hideTimer?.cancel();
+    if (locked || !showControls) return;
+    hideTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && !locked && controller?.value.isPlaying == true) {
+        setState(() => showControls = false);
+      }
+    });
+  }
+
+  void _toggleControls() {
+    if (locked) return;
+    setState(() => showControls = !showControls);
+    _scheduleHide();
+  }
+
+  Future<void> _togglePlayPause() async {
+    final c = controller;
+    if (c == null || !c.value.isInitialized) return;
+    if (c.value.isPlaying) {
+      await c.pause();
+      setState(() => showControls = true);
+    } else {
+      await c.play();
+      setState(() => showControls = true);
+      _scheduleHide();
+    }
+  }
+
+  Future<void> _showSpeedPicker() async {
+    final selected = await showModalBottomSheet<double>(
+      context: context,
+      backgroundColor: const Color(0xFF171A23),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Playback speed', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map((value) =>
+              ChoiceChip(
+                label: Text(value == 1.0 ? 'Normal' : value.toString() + '×'),
+                selected: speed == value,
+                onSelected: (_) => Navigator.pop(context, value),
+              )).toList()),
+          ]),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() => speed = selected);
+    try { await controller?.setPlaybackSpeed(selected); } catch (_) {}
+  }
+
+  Future<void> _showServerPicker() async {
+    final selected = await showModalBottomSheet<StreamChoice>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF10131A),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              const Expanded(child: Text('Playback servers', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900))),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
+            ]),
+            const Text('Direct streams use the native video player. Short links and embed pages open inside AniSteam’s WebView.', style: TextStyle(color: Color(0xFF9CA2B0))),
+            const SizedBox(height: 12),
+            Flexible(child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: streams.length,
+              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFF292D38)),
+              itemBuilder: (context, index) {
+                final item = streams[index];
+                return ListTile(
+                  leading: Icon(item.isDirect ? Icons.play_circle_fill_rounded : Icons.language_rounded, color: item.url == active?.url ? lime : const Color(0xFF9CA2B0), size: 29),
+                  title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(item.playbackKind + ' · ' + item.language),
+                  trailing: item.url == active?.url ? const Icon(Icons.check_circle_rounded, color: lime) : const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.pop(context, item),
+                );
+              },
+            )),
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: OutlinedButton.icon(
+              onPressed: () => Navigator.pop(context, const StreamChoice(title: '__refresh__', url: 'https://invalid.local')),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Refresh servers'),
+            )),
+          ]),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    if (selected.title == '__refresh__') {
+      await _refreshServers();
+    } else {
+      await _selectStream(selected);
+    }
+  }
+
+  Future<void> _showEpisodes() async {
+    if (!_hasPlaylist) return;
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF10131A),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              const Expanded(child: Text('Episodes', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900))),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
+            ]),
+            Flexible(child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: widget.playlist.length,
+              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFF292D38)),
+              itemBuilder: (context, index) {
+                final episode = widget.playlist[index];
+                return ListTile(
+                  leading: CircleAvatar(backgroundColor: index == currentIndex ? lime.withValues(alpha: .15) : const Color(0xFF252936), child: Text((index + 1).toString(), style: TextStyle(color: index == currentIndex ? lime : Colors.white))),
+                  title: Text(episode.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(episode.source),
+                  trailing: index == currentIndex ? const Icon(Icons.equalizer_rounded, color: lime) : null,
+                  onTap: () => Navigator.pop(context, index),
+                );
+              },
+            )),
+          ]),
+        ),
+      ),
+    );
+    if (selected != null && mounted && selected != currentIndex) await _playEpisode(selected);
+  }
+
+  Widget _playerSurface() {
+    final choice = active;
+    if (choice == null) {
+      return const ColoredBox(color: Colors.black, child: Center(child: CircularProgressIndicator()));
+    }
+    if (choice.isDirect) {
+      final c = controller;
+      if (c == null || !c.value.isInitialized) {
+        return const ColoredBox(color: Colors.black, child: Center(child: CircularProgressIndicator()));
+      }
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: c.value.size.width,
+              height: c.value.size.height,
+              child: VideoPlayer(c),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return InAppWebView(
+      key: ValueKey<String>(choice.url),
+      initialUrlRequest: URLRequest(url: WebUri(choice.url)),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        domStorageEnabled: true,
+        databaseEnabled: true,
+        mediaPlaybackRequiresUserGesture: false,
+        allowsInlineMediaPlayback: true,
+        mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+        useWideViewPort: true,
+        loadWithOverviewMode: true,
+        allowFileAccess: false,
+        allowContentAccess: true,
+        supportMultipleWindows: false,
+        javaScriptCanOpenWindowsAutomatically: false,
+        userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      ),
+      onWebViewCreated: (web) => webController = web,
+      onLoadStart: (web, url) {
+        if (mounted) setState(() => webLoading = true);
+      },
+      onLoadStop: (web, url) {
+        if (mounted) setState(() => webLoading = false);
+      },
+      shouldOverrideUrlLoading: (web, action) async {
+        final uri = action.request.url;
+        if (uri == null) return NavigationActionPolicy.CANCEL;
+        final scheme = uri.scheme.toLowerCase();
+        if (scheme == 'https' || scheme == 'http') return NavigationActionPolicy.ALLOW;
+        return NavigationActionPolicy.CANCEL;
+      },
+      onReceivedError: (web, request, error) {
+        if (request.isForMainFrame == true && mounted) {
+          setState(() {
+            webLoading = false;
+            errorMessage = 'This embedded server could not load. Try another server or open it externally.';
+          });
+        }
+      },
+      onEnterFullscreen: (web) {
+        if (mounted && !fullscreen) _enterFullscreen();
+      },
+      onExitFullscreen: (web) {
+        if (mounted && fullscreen) _leaveFullscreen();
+      },
+    );
+  }
+
+  Widget _directControls({required bool isFullscreen}) {
+    final c = controller;
+    final value = c?.value;
+    final maxMs = duration.inMilliseconds > 0 ? duration.inMilliseconds.toDouble() : 1.0;
+    final currentMs = position.inMilliseconds.clamp(0, maxMs.toInt()).toDouble();
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: !showControls || locked,
+        child: AnimatedOpacity(
+          opacity: showControls && !locked ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(gradient: LinearGradient(
+              begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [Color(0xB8000000), Colors.transparent, Colors.transparent, Color(0xDD000000)],
+              stops: [0, .25, .62, 1],
+            )),
+            child: Stack(children: [
+              Positioned(left: 6, right: 6, top: 0, child: Row(children: [
+                IconButton(onPressed: () { if (isFullscreen) _leaveFullscreen(); else Navigator.maybePop(context); }, icon: const Icon(Icons.arrow_back_rounded, color: Colors.white)),
+                Expanded(child: Text(_animeTitle + ' · ' + (currentEpisode?.title ?? ''), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
+                IconButton(onPressed: _showServerPicker, icon: const Icon(Icons.dns_rounded, color: Colors.white)),
+                IconButton(onPressed: _openExternal, icon: const Icon(Icons.open_in_new_rounded, color: Colors.white)),
+              ])),
+              Center(child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                IconButton(onPressed: _hasPrevious ? () => _playEpisode(currentIndex - 1) : null, iconSize: 36, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+                const SizedBox(width: 18),
+                IconButton.filled(onPressed: _togglePlayPause, iconSize: 36, style: IconButton.styleFrom(backgroundColor: Colors.white.withValues(alpha: .18)), icon: Icon(value?.isPlaying == true ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white)),
+                const SizedBox(width: 18),
+                IconButton(onPressed: _hasNext ? () => _playEpisode(currentIndex + 1) : null, iconSize: 36, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
+              ])),
+              Positioned(left: 14, right: 14, bottom: 8, child: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (duration > Duration.zero) Slider(
+                  value: currentMs, min: 0, max: maxMs,
+                  onChanged: (ms) => setState(() => position = Duration(milliseconds: ms.round())),
+                  onChangeEnd: (ms) => controller?.seekTo(Duration(milliseconds: ms.round())),
+                  activeColor: lime, inactiveColor: Colors.white24,
+                ),
+                Row(children: [
+                  Text(_durationText(position) + ' / ' + _durationText(duration), style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  const Spacer(),
+                  Text(speed.toString() + '×', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  IconButton(onPressed: _showSpeedPicker, icon: const Icon(Icons.speed_rounded, color: Colors.white)),
+                  IconButton(onPressed: () => setState(() { locked = true; showControls = false; }), icon: const Icon(Icons.lock_outline_rounded, color: Colors.white)),
+                  IconButton(onPressed: _toggleFullscreen, icon: Icon(isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, color: Colors.white)),
+                ]),
+              ])),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _durationText(Duration value) {
+    final seconds = value.inSeconds;
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    final remainder = seconds % 60;
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = remainder.toString().padLeft(2, '0');
+    return hours > 0 ? hours.toString() + ':' + mm + ':' + ss : mm + ':' + ss;
+  }
+
+  Widget _playerArea({required bool isFullscreen}) {
+    final surface = _playerSurface();
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (active?.isDirect == true)
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _toggleControls, child: surface)
+        else
+          surface,
+        if (loadingPlayer || webLoading)
+          const ColoredBox(color: Color(0x55000000), child: Center(child: CircularProgressIndicator(color: lime))),
+        if (active?.isDirect == true) _directControls(isFullscreen: isFullscreen),
+        if (active?.isDirect != true && isFullscreen && showControls && !locked)
+          Positioned(left: 6, right: 6, top: 0, child: DecoratedBox(
+            decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xCC000000), Colors.transparent])),
+            child: Row(children: [
+              IconButton(onPressed: _leaveFullscreen, icon: const Icon(Icons.arrow_back_rounded, color: Colors.white)),
+              Expanded(child: Text(currentEpisode?.title ?? 'AniSteam Player', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
+              IconButton(onPressed: _showServerPicker, icon: const Icon(Icons.dns_rounded, color: Colors.white)),
+              IconButton(onPressed: _openExternal, icon: const Icon(Icons.open_in_new_rounded, color: Colors.white)),
+              IconButton(onPressed: _toggleFullscreen, icon: const Icon(Icons.fullscreen_exit_rounded, color: Colors.white)),
+            ]),
+          )),
+        if (locked)
+          Positioned(right: 14, bottom: 14, child: FilledButton.tonalIcon(
+            onPressed: () => setState(() { locked = false; showControls = true; _scheduleHide(); }),
+            icon: const Icon(Icons.lock_open_rounded),
+            label: const Text('Unlock controls'),
+          )),
+      ],
+    );
+  }
+
+  @override Widget build(BuildContext context) {
+    if (fullscreen) {
+      return WillPopScope(
+        onWillPop: () async { await _leaveFullscreen(); return false; },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: SizedBox.expand(child: _playerArea(isFullscreen: true)),
+        ),
+      );
+    }
+
+    return WillPopScope(
+      onWillPop: () async {
+        if (fullscreen) { await _leaveFullscreen(); return false; }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: 0,
+          title: const Row(children: [
+            AniSteamLogo(size: 30),
+            SizedBox(width: 8),
+            Text('AniSteam Player', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+          ]),
+          actions: [
+            IconButton(tooltip: 'Reload server', onPressed: _refreshServers, icon: const Icon(Icons.refresh_rounded)),
+            IconButton(tooltip: 'Open external player', onPressed: active == null ? null : _openExternal, icon: const Icon(Icons.open_in_new_rounded)),
+            IconButton(tooltip: 'Choose server', onPressed: streams.isEmpty ? null : _showServerPicker, icon: const Icon(Icons.dns_rounded)),
+            IconButton(tooltip: 'Playback speed', onPressed: active?.isDirect == true ? _showSpeedPicker : null, icon: const Icon(Icons.speed_rounded)),
+            IconButton(tooltip: 'Fullscreen', onPressed: active == null ? null : _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
+          ],
+        ),
+        body: loadingStreams
+          ? const Center(child: CircularProgressIndicator())
+          : errorMessage != null && active == null
+            ? Center(child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.cloud_off_rounded, color: Color(0xFFFFB86B), size: 42),
+                  const SizedBox(height: 12),
+                  const Text('Playback unavailable', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 8),
+                  Text(errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF9CA2B0))),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(onPressed: _refreshServers, icon: const Icon(Icons.refresh_rounded), label: const Text('Retry servers')),
+                ]),
+              ))
+            : ListView(
+                children: [
+                  AspectRatio(aspectRatio: 16 / 9, child: _playerArea(isFullscreen: false)),
+                  if (errorMessage != null)
+                    Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), child: Text(errorMessage!, style: const TextStyle(color: Color(0xFFFFB86B)))),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_animeTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 5),
+                      Text((currentEpisode?.title ?? 'Playing episode') + ' · ' + (active?.title ?? 'Finding server'), style: const TextStyle(color: Color(0xFF9CA2B0))),
+                      const SizedBox(height: 14),
+                      Row(children: [
+                        Expanded(child: Text('PLAYBACK SERVERS', style: const TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.2))),
+                        TextButton.icon(onPressed: _refreshServers, icon: const Icon(Icons.refresh_rounded, size: 18), label: const Text('Refresh')),
+                      ]),
+                      if (streams.isEmpty)
+                        const Text('No servers returned for this episode.', style: TextStyle(color: Color(0xFF9CA2B0)))
+                      else
+                        SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: streams.map((choice) =>
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              selected: choice.url == active?.url,
+                              label: Text(choice.title),
+                              avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17),
+                              onSelected: (_) => _selectStream(choice),
+                            ),
+                          )).toList())),
+                      const SizedBox(height: 16),
+                      Card(child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(currentEpisode?.title ?? 'Episode', style: const TextStyle(fontWeight: FontWeight.w900)),
+                          const SizedBox(height: 5),
+                          Text(active?.playbackKind ?? 'Resolving playback server', style: const TextStyle(color: Color(0xFF9CA2B0))),
+                          const SizedBox(height: 12),
+                          Row(children: [
+                            Expanded(child: OutlinedButton.icon(
+                              onPressed: _hasPrevious ? () => _playEpisode(currentIndex - 1) : null,
+                              icon: const Icon(Icons.skip_previous_rounded),
+                              label: const Text('Previous'),
+                            )),
+                            const SizedBox(width: 8),
+                            Expanded(child: OutlinedButton.icon(
+                              onPressed: _hasPlaylist ? _showEpisodes : null,
+                              icon: const Icon(Icons.playlist_play_rounded),
+                              label: const Text('Episodes'),
+                            )),
+                            const SizedBox(width: 8),
+                            Expanded(child: FilledButton.icon(
+                              onPressed: _hasNext ? () => _playEpisode(currentIndex + 1) : null,
+                              icon: const Icon(Icons.skip_next_rounded),
+                              label: const Text('Next'),
+                            )),
+                          ]),
+                        ]),
+                      )),
+                      const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Short links and embedded player pages stay inside AniSteam. Direct MP4/HLS streams use the in-app video player; use Open external player to hand a link to another Android app.', style: TextStyle(color: Color(0xFF9CA2B0), height: 1.45))),
+                    ]),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+on:Icon(c.value.isPlaying?Icons.pause_rounded:Icons.play_arrow_rounded)),VideoProgressIndicator(c,allowScrubbing:true)])));}}
 class HistoryTab extends StatelessWidget {const HistoryTab({super.key,required this.items,required this.onClear,required this.onOpen});final List<Anime> items;final VoidCallback onClear;final ValueChanged<Anime> onOpen;@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Watch history',style:TextStyle(fontWeight:FontWeight.w900)),actions:[IconButton(onPressed:items.isEmpty?null:onClear,icon:const Icon(Icons.delete_sweep_rounded))]),body:items.isEmpty?const EmptyView(title:'Nothing watched yet',message:'Episodes you open will be saved here on this device.'):ListView.builder(itemCount:items.length,itemBuilder:(context,i){final a=items[i];return ListTile(leading:const Icon(Icons.history_rounded,color:lime),title:Text(a.title,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(a.source),trailing:const Icon(Icons.chevron_right_rounded),onTap:()=>onOpen(a));}));}
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key, required this.sourceMode, required this.onMode});
