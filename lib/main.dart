@@ -348,14 +348,79 @@ class _HomeTabState extends State<HomeTab>{
   if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>future=AniApi.catalogue()));
   final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No catalogue yet',message:'The API returned no catalogue items.');
   return RefreshIndicator(onRefresh:()async{setState(()=>future=AniApi.catalogue());try{await future;}catch(_){}},child:CustomScrollView(slivers:[
-   SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(18,12,18,20),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-    const Text('Your next obsession starts here.',style:TextStyle(fontSize:27,fontWeight:FontWeight.w900,height:1.1)),
-    const SizedBox(height:8),Text('Discover anime · ${widget.sourceMode=='COMBINED'?'ToonStream + HiAnime':widget.sourceMode}',style:const TextStyle(color:Color(0xFF9CA2B0))),
-    const SizedBox(height:18),const Row(children:[Icon(Icons.auto_awesome_rounded,color:lime),SizedBox(width:8),Text('Explore catalogue',style:TextStyle(fontSize:17,fontWeight:FontWeight.w800))])
+   SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(16,10,16,20),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+    _HomeHero(sourceMode: widget.sourceMode),
+    const SizedBox(height:20),
+    const Row(children:[Icon(Icons.auto_awesome_rounded,color:lime),SizedBox(width:8),Text('Explore catalogue',style:TextStyle(fontSize:17,fontWeight:FontWeight.w800))])
    ]))),
    SliverPadding(padding:const EdgeInsets.fromLTRB(16,0,16,24),sliver:SliverGrid(delegate:SliverChildBuilderDelegate((context,i)=>AnimeCard(anime:list[i],onTap:()=>widget.onOpen(list[i])),childCount:list.length),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:2,mainAxisSpacing:15,crossAxisSpacing:13,childAspectRatio:.59)))
   ]));
   }));}
+class _HomeHero extends StatelessWidget {
+  const _HomeHero({required this.sourceMode});
+  final String sourceMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceLabel = sourceMode == 'COMBINED'
+        ? 'TOONSTREAM  +  HIANIME'
+        : sourceMode.replaceAll('_', ' ');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(19),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF252B3B), Color(0xFF151923), Color(0xFF10131A)],
+        ),
+        border: Border.all(color: lime.withValues(alpha: .28)),
+        boxShadow: [BoxShadow(color: lime.withValues(alpha: .06), blurRadius: 24, spreadRadius: 1)],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -12,
+            bottom: -24,
+            child: Icon(Icons.play_circle_outline_rounded, size: 132,
+                color: lime.withValues(alpha: .07)),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const AniSteamLogo(size: 38),
+                const SizedBox(width: 10),
+                const Text('AniSteam', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                const Spacer(),
+                const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFF9A43), size: 21),
+              ]),
+              const SizedBox(height: 22),
+              const Text('Your next obsession\nstarts here.',
+                  style: TextStyle(fontSize: 26, height: 1.08, fontWeight: FontWeight.w900, letterSpacing: -.4)),
+              const SizedBox(height: 9),
+              const Text('Find a series. Pick an episode. Get watching.',
+                  style: TextStyle(fontSize: 13, color: Color(0xFFB6BDCB), height: 1.4)),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                decoration: BoxDecoration(
+                  color: lime.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: lime.withValues(alpha: .20)),
+                ),
+                child: Text(sourceLabel,
+                    style: const TextStyle(fontSize: 10, letterSpacing: 1.0, fontWeight: FontWeight.w800, color: lime)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class SearchTab extends StatefulWidget {const SearchTab({super.key,required this.sourceMode,required this.onOpen});final String sourceMode;final ValueChanged<Anime> onOpen;@override State<SearchTab> createState()=>_SearchTabState();}
 class _SearchTabState extends State<SearchTab>{
  final controller=TextEditingController();Future<List<Anime>>? future;bool busy=false;
@@ -398,7 +463,6 @@ class _WatchScreenState extends State<WatchScreen> {
   final TextEditingController serverFilterController = TextEditingController();
   String serverFilter = '';
   bool showAllServers = false;
-  bool redirectBlockerEnabled = true;
   bool keepScreenAwake = true;
   StreamChoice? active;
   VideoPlayerController? controller;
@@ -454,17 +518,33 @@ class _WatchScreenState extends State<WatchScreen> {
     }).toList();
   }
 
-  bool _isBlockedRedirectHost(String host) {
-    final normalized = host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
-    const blockedDomains = <String>{
-      'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-      'adservice.google.com', 'popads.net', 'popcash.net', 'onclickads.net',
-      'onclickmega.com', 'exoclick.com', 'trafficjunky.net', 'juicyads.com',
-      'adnxs.com', 'adform.net', 'taboola.com', 'outbrain.com',
+  bool _isTrustedShortNavigation(Uri target, Uri source) {
+    final targetHost = target.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final sourceHost = source.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    if (targetHost.isEmpty || sourceHost.isEmpty) return false;
+
+    // Allow the same provider domain and its subdomains.
+    if (targetHost == sourceHost ||
+        targetHost.endsWith('.' + sourceHost) ||
+        sourceHost.endsWith('.' + targetHost)) {
+      return true;
+    }
+
+    // Permit common video/CDN hosts needed by embedded players, rather than
+    // allowing an arbitrary redirect destination to take over the iframe.
+    const trustedVideoHostTerms = <String>{
+      'abyssplayer', 'abyss.to', 'ravok', 'jwplayer', 'googlevideo.com',
+      'vidcloud', 'megacloud', 'streamtape', 'rabbitstream', 'vidstreaming',
+      'gogo', 'mp4upload', 'filemoon', 'streamwish', 'voe', 'dood',
+      'vidhide', 'vizcloud', 'mycloud', 'mcloud', 'vidsrc', 'embed',
+      'player', 'cdn', 'storage', 'video', 'stream',
     };
-    return blockedDomains.any((domain) =>
-        normalized == domain || normalized.endsWith('.' + domain));
+    if (trustedVideoHostTerms.any((term) => targetHost.contains(term))) return true;
+
+    final url = target.toString().toLowerCase();
+    return RegExp(r'\.(m3u8|mp4|webm|mkv|ts)(?:$|[?#])').hasMatch(url);
   }
+
   bool get _hasPlaylist => widget.playlist.isNotEmpty;
   bool get _hasPrevious => _hasPlaylist && currentIndex > 0;
   bool get _hasNext => _hasPlaylist && currentIndex < widget.playlist.length - 1;
@@ -480,7 +560,6 @@ class _WatchScreenState extends State<WatchScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       showAllServers = prefs.getBool('show_all_servers') ?? false;
-      redirectBlockerEnabled = prefs.getBool('redirect_blocker_enabled') ?? true;
       keepScreenAwake = prefs.getBool('keep_screen_awake') ?? true;
     } catch (_) {}
     if (!mounted) return;
@@ -886,7 +965,7 @@ class _WatchScreenState extends State<WatchScreen> {
     final useShortIframe = _toonStreamOnly &&
         (choice.title.trim().toLowerCase() == 'short' ||
          choice.isShortLink || host == 'abyssplayer.com' ||
-         host == 'www.abyssplayer.com');
+         host.endsWith('.abyssplayer.com'));
     final escapedSrc = choice.url
         .replaceAll('&', '&amp;')
         .replaceAll('"', '&quot;')
@@ -947,18 +1026,18 @@ class _WatchScreenState extends State<WatchScreen> {
           return NavigationActionPolicy.CANCEL;
         }
 
-        // For the ToonStream Short player, never let a top-level click or
-        // redirect replace AniSteam's player page with another website.
-        // The provider iframe can still follow its own internal redirect chain
-        // to reach the video player.
-        if (useShortIframe && action.isForMainFrame == true) {
-          return NavigationActionPolicy.CANCEL;
-        }
+        if (useShortIframe) {
+          // Never let the top-level WebView leave AniSteam's local wrapper page.
+          if (action.isForMainFrame == true) {
+            return NavigationActionPolicy.CANCEL;
+          }
 
-        // Keep the optional redirect filter independent of the navigation
-        // rule above. Short playback does not require an ad blocker.
-        if (redirectBlockerEnabled && _isBlockedRedirectHost(uri.host)) {
-          return NavigationActionPolicy.CANCEL;
+          // Keep the provider's iframe on its own domain or known video/CDN
+          // destinations. No separate ad-blocker toggle is required.
+          final sourceUri = Uri.tryParse(choice.url);
+          if (sourceUri == null || !_isTrustedShortNavigation(uri, sourceUri)) {
+            return NavigationActionPolicy.CANCEL;
+          }
         }
         return NavigationActionPolicy.ALLOW;
       },
@@ -1261,7 +1340,6 @@ class _SettingsTabState extends State<SettingsTab> {
   bool checking = false;
   String? connectionStatus;
   bool showAllServers = false;
-  bool redirectBlockerEnabled = true;
   bool keepScreenAwake = true;
 
   @override
@@ -1276,8 +1354,7 @@ class _SettingsTabState extends State<SettingsTab> {
       if (!mounted) return;
       setState(() {
         showAllServers = prefs.getBool('show_all_servers') ?? false;
-        redirectBlockerEnabled = prefs.getBool('redirect_blocker_enabled') ?? true;
-        keepScreenAwake = prefs.getBool('keep_screen_awake') ?? true;
+          keepScreenAwake = prefs.getBool('keep_screen_awake') ?? true;
       });
     } catch (_) {}
   }
@@ -1358,16 +1435,6 @@ class _SettingsTabState extends State<SettingsTab> {
           secondary: const Icon(Icons.dns_rounded),
           title: const Text('Show all servers', style: TextStyle(fontWeight: FontWeight.w800)),
           subtitle: const Text('Off: automatically show Moly, Short and Play for ToonStream. On: list all returned servers.'),
-          activeColor: lime,
-        ),
-      ),
-      Card(
-        child: SwitchListTile(
-          value: redirectBlockerEnabled,
-          onChanged: (value) => _savePlayerSetting('redirect_blocker_enabled', value, () => redirectBlockerEnabled = value),
-          secondary: const Icon(Icons.shield_outlined),
-          title: const Text('Redirect blocker', style: TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: const Text('Block known ad domains and stop links that try to open other Android apps.'),
           activeColor: lime,
         ),
       ),
