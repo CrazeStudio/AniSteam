@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 const defaultApiBase = 'https://anisteam-api-sooty.vercel.app';
 const lime = Color(0xFFB8F35A);
@@ -383,7 +384,11 @@ class _WatchScreenState extends State<WatchScreen> {
   Anime? currentEpisode;
   int currentIndex = 0;
   List<StreamChoice> streams = [];
-  String serverFilter = 'All';
+  final TextEditingController serverFilterController = TextEditingController();
+  String serverFilter = '';
+  bool showAllServers = false;
+  bool redirectBlockerEnabled = true;
+  bool keepScreenAwake = true;
   StreamChoice? active;
   VideoPlayerController? controller;
   InAppWebViewController? webController;
@@ -405,16 +410,49 @@ class _WatchScreenState extends State<WatchScreen> {
 
   String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
   bool get _toonStreamOnly => (currentEpisode?.source ?? widget.episode.source).toLowerCase().contains('toonstream');
+  bool _isPreferredToonStreamServer(StreamChoice choice) {
+    final title = choice.title.toLowerCase();
+    final host = Uri.tryParse(choice.url)?.host.toLowerCase() ?? '';
+    if (choice.isShortLink || title.contains('short') || title.contains('abyss') ||
+        host == 'abyssplayer.com' || host.endsWith('.abyssplayer.com')) {
+      return true;
+    }
+    if (RegExp(r'(^|[^a-z])moly([^a-z]|$)').hasMatch(title) || host.contains('moly')) {
+      return true;
+    }
+    if (RegExp(r'(^|[^a-z])play([^a-z]|$)').hasMatch(title) || host.startsWith('play.')) {
+      return true;
+    }
+    return false;
+  }
+
   List<StreamChoice> get _filteredStreams {
-    if (!_toonStreamOnly || serverFilter.trim().isEmpty) return streams;
+    var visible = streams;
+    if (_toonStreamOnly && !showAllServers) {
+      visible = visible.where(_isPreferredToonStreamServer).toList();
+    }
     final query = serverFilter.trim().toLowerCase();
-    return streams.where((choice) =>
-      choice.title.toLowerCase().contains(query) ||
-      choice.source.toLowerCase().contains(query) ||
-      choice.url.toLowerCase().contains(query) ||
-      (query == 'play' && (choice.isDirect || choice.playbackKind.toLowerCase().contains('player'))) ||
-      (query == 'short' && (choice.isShortLink || choice.title.toLowerCase().contains('abyss')))
-    ).toList();
+    if (query.isEmpty) return visible;
+    return visible.where((choice) {
+      final host = Uri.tryParse(choice.url)?.host.toLowerCase() ?? '';
+      return choice.title.toLowerCase().contains(query) ||
+          choice.source.toLowerCase().contains(query) ||
+          host.contains(query) ||
+          (query == 'play' && choice.playbackKind.toLowerCase().contains('player')) ||
+          (query == 'short' && (choice.isShortLink || choice.title.toLowerCase().contains('abyss')));
+    }).toList();
+  }
+
+  bool _isBlockedRedirectHost(String host) {
+    final normalized = host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    const blockedDomains = <String>{
+      'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+      'adservice.google.com', 'popads.net', 'popcash.net', 'onclickads.net',
+      'onclickmega.com', 'exoclick.com', 'trafficjunky.net', 'juicyads.com',
+      'adnxs.com', 'adform.net', 'taboola.com', 'outbrain.com',
+    };
+    return blockedDomains.any((domain) =>
+        normalized == domain || normalized.endsWith('.' + domain));
   }
   bool get _hasPlaylist => widget.playlist.isNotEmpty;
   bool get _hasPrevious => _hasPlaylist && currentIndex > 0;
@@ -424,11 +462,27 @@ class _WatchScreenState extends State<WatchScreen> {
     super.initState();
     currentEpisode = widget.episode;
     currentIndex = widget.startIndex;
-    _loadEpisode(widget.episode, index: widget.startIndex);
+    _loadPlaybackSettingsAndPlay();
+  }
+
+  Future<void> _loadPlaybackSettingsAndPlay() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      showAllServers = prefs.getBool('show_all_servers') ?? false;
+      redirectBlockerEnabled = prefs.getBool('redirect_blocker_enabled') ?? true;
+      keepScreenAwake = prefs.getBool('keep_screen_awake') ?? true;
+    } catch (_) {}
+    if (!mounted) return;
+    if (keepScreenAwake) {
+      try { await WakelockPlus.enable(); } catch (_) {}
+    }
+    await _loadEpisode(widget.episode, index: widget.startIndex);
   }
 
   @override void dispose() {
     hideTimer?.cancel();
+    serverFilterController.dispose();
+    try { unawaited(WakelockPlus.disable()); } catch (_) {}
     final old = controller;
     if (old != null) {
       old.removeListener(_onVideoTick);
@@ -448,9 +502,11 @@ class _WatchScreenState extends State<WatchScreen> {
       await old.dispose();
     }
     if (!mounted) return;
+    serverFilterController.clear();
     setState(() {
       currentEpisode = episode;
       if (index != null) currentIndex = index;
+      serverFilter = '';
       streams = [];
       active = null;
       webController = null;
@@ -474,7 +530,16 @@ class _WatchScreenState extends State<WatchScreen> {
         setState(() => errorMessage = 'No playable servers were found for this episode.');
         return;
       }
-      final preferred = result.firstWhere((item) => item.isDirect, orElse: () => result.first);
+      final preferredPool = _toonStreamOnly && !showAllServers
+          ? result.where(_isPreferredToonStreamServer).toList()
+          : result;
+      if (_toonStreamOnly && !showAllServers && preferredPool.isEmpty) {
+        setState(() => errorMessage =
+            'Auto-filter could not find Moly, Short or Play. Enable “Show all servers” in Settings to inspect the complete list.');
+        return;
+      }
+      final pool = preferredPool.isEmpty ? result : preferredPool;
+      final preferred = pool.firstWhere((item) => item.isDirect, orElse: () => pool.first);
       await _selectStream(preferred);
     } catch (e) {
       if (mounted) {
@@ -518,7 +583,10 @@ class _WatchScreenState extends State<WatchScreen> {
       if (uri == null || !uri.hasScheme || (uri.scheme != 'https' && uri.scheme != 'http')) {
         throw Exception('Invalid media URL');
       }
-      final next = VideoPlayerController.networkUrl(uri);
+      final next = VideoPlayerController.networkUrl(
+        uri,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      );
       controller = next;
       await next.initialize();
       if (!mounted || controller != next) {
@@ -837,8 +905,11 @@ class _WatchScreenState extends State<WatchScreen> {
         final uri = action.request.url;
         if (uri == null) return NavigationActionPolicy.CANCEL;
         final scheme = uri.scheme.toLowerCase();
-        if (scheme == 'https' || scheme == 'http') return NavigationActionPolicy.ALLOW;
-        return NavigationActionPolicy.CANCEL;
+        if (scheme != 'https' && scheme != 'http') return NavigationActionPolicy.CANCEL;
+        if (redirectBlockerEnabled && _isBlockedRedirectHost(uri.host)) {
+          return NavigationActionPolicy.CANCEL;
+        }
+        return NavigationActionPolicy.ALLOW;
       },
       onReceivedError: (web, request, error) {
         if (request.isForMainFrame == true && mounted) {
@@ -986,9 +1057,7 @@ class _WatchScreenState extends State<WatchScreen> {
           ]),
           actions: [
             IconButton(tooltip: 'Reload player', onPressed: _reloadPlayback, icon: const Icon(Icons.refresh_rounded)),
-            IconButton(tooltip: 'Open external player', onPressed: active == null ? null : _openExternal, icon: const Icon(Icons.open_in_new_rounded)),
             IconButton(tooltip: 'Choose server', onPressed: streams.isEmpty ? null : _showServerPicker, icon: const Icon(Icons.dns_rounded)),
-            IconButton(tooltip: 'Playback speed', onPressed: active?.isDirect == true ? _showSpeedPicker : null, icon: const Icon(Icons.speed_rounded)),
             IconButton(tooltip: 'Fullscreen', onPressed: active == null ? null : _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
           ],
         ),
@@ -1026,45 +1095,59 @@ class _WatchScreenState extends State<WatchScreen> {
                       if (streams.isEmpty)
                         const Text('No servers returned for this episode.', style: TextStyle(color: Color(0xFF9CA2B0)))
                       else ...[
-                        if (_toonStreamOnly) ...[
-                          TextField(
-                            key: const ValueKey('toonstream-server-filter'),
-                            onChanged: (value) => setState(() => serverFilter = value),
-                            decoration: InputDecoration(
-                              hintText: 'Filter servers by name, e.g. Moly, Short, Play',
-                              prefixIcon: const Icon(Icons.search_rounded),
-                              suffixIcon: serverFilter.isEmpty ? null : IconButton(
-                                tooltip: 'Clear server filter',
-                                onPressed: () => setState(() => serverFilter = ''),
-                                icon: const Icon(Icons.close_rounded),
-                              ),
-                              isDense: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        TextField(
+                          key: const ValueKey('server-filter'),
+                          controller: serverFilterController,
+                          onChanged: (value) => setState(() => serverFilter = value),
+                          decoration: InputDecoration(
+                            hintText: 'Search servers by name',
+                            prefixIcon: const Icon(Icons.search_rounded),
+                            suffixIcon: serverFilter.isEmpty ? null : IconButton(
+                              tooltip: 'Clear server filter',
+                              onPressed: () {
+                                serverFilterController.clear();
+                                setState(() => serverFilter = '');
+                              },
+                              icon: const Icon(Icons.close_rounded),
                             ),
+                            isDense: true,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          const SizedBox(height: 10),
-                        ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_toonStreamOnly && !showAllServers)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 10),
+                            child: Row(children: [
+                              Icon(Icons.auto_awesome_rounded, size: 15, color: lime),
+                              SizedBox(width: 6),
+                              Expanded(child: Text('Auto filter · Moly, Short and Play',
+                                style: TextStyle(color: Color(0xFF9CA2B0), fontSize: 12))),
+                            ]),
+                          ),
                         Builder(builder: (context) {
                           final visibleServers = _filteredStreams;
                           if (visibleServers.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 10),
-                              child: Text('No matching servers found. Try another server name.',
-                                style: TextStyle(color: Color(0xFF9CA2B0))),
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: Text(
+                                serverFilter.isNotEmpty
+                                  ? 'No matching servers. Clear the search or try another name.'
+                                  : 'Auto-filter hid unrecognized servers. Enable “Show all servers” in Settings to view them.',
+                                style: const TextStyle(color: Color(0xFF9CA2B0), height: 1.4),
+                              ),
                             );
                           }
-                          return SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(children: visibleServers.map((choice) =>
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: ChoiceChip(
-                                  selected: choice.url == active?.url,
-                                  label: Text(choice.title),
-                                  avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17),
-                                  onSelected: (_) => _selectStream(choice),
-                                ),
-                              )).toList()),
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: visibleServers.map((choice) =>
+                              ChoiceChip(
+                                selected: choice.url == active?.url,
+                                label: Text(choice.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17),
+                                onSelected: (_) => _selectStream(choice),
+                              )).toList(),
                           );
                         }),
                       ],
@@ -1080,19 +1163,22 @@ class _WatchScreenState extends State<WatchScreen> {
                             Expanded(child: OutlinedButton.icon(
                               onPressed: _hasPrevious ? () => _playEpisode(currentIndex - 1) : null,
                               icon: const Icon(Icons.skip_previous_rounded),
-                              label: const Text('Previous'),
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12)),
+                              label: const Text('Prev', maxLines: 1, overflow: TextOverflow.ellipsis),
                             )),
                             const SizedBox(width: 8),
                             Expanded(child: OutlinedButton.icon(
                               onPressed: _hasPlaylist ? _showEpisodes : null,
                               icon: const Icon(Icons.playlist_play_rounded),
-                              label: const Text('Episodes'),
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12)),
+                              label: const Text('List', maxLines: 1, overflow: TextOverflow.ellipsis),
                             )),
                             const SizedBox(width: 8),
                             Expanded(child: FilledButton.icon(
                               onPressed: _hasNext ? () => _playEpisode(currentIndex + 1) : null,
                               icon: const Icon(Icons.skip_next_rounded),
-                              label: const Text('Next'),
+                              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12)),
+                              label: const Text('Next', maxLines: 1, overflow: TextOverflow.ellipsis),
                             )),
                           ]),
                         ]),
@@ -1117,6 +1203,33 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   bool checking = false;
   String? connectionStatus;
+  bool showAllServers = false;
+  bool redirectBlockerEnabled = true;
+  bool keepScreenAwake = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlayerSettings();
+  }
+
+  Future<void> _loadPlayerSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        showAllServers = prefs.getBool('show_all_servers') ?? false;
+        redirectBlockerEnabled = prefs.getBool('redirect_blocker_enabled') ?? true;
+        keepScreenAwake = prefs.getBool('keep_screen_awake') ?? true;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _savePlayerSetting(String key, bool value, VoidCallback applyValue) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+    if (mounted) setState(applyValue);
+  }
 
   Future<void> checkConnection() async {
     if (checking) return;
@@ -1155,6 +1268,39 @@ class _SettingsTabState extends State<SettingsTab> {
           activeColor: lime,
           onChanged: (value) { if (value != null) widget.onMode(value); },
         )),
+      const SizedBox(height:22),
+      const Text('PLAYER PREFERENCES', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+      const SizedBox(height:10),
+      Card(
+        child: SwitchListTile(
+          value: showAllServers,
+          onChanged: (value) => _savePlayerSetting('show_all_servers', value, () => showAllServers = value),
+          secondary: const Icon(Icons.dns_rounded),
+          title: const Text('Show all servers', style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Off: automatically show Moly, Short and Play for ToonStream. On: list all returned servers.'),
+          activeColor: lime,
+        ),
+      ),
+      Card(
+        child: SwitchListTile(
+          value: redirectBlockerEnabled,
+          onChanged: (value) => _savePlayerSetting('redirect_blocker_enabled', value, () => redirectBlockerEnabled = value),
+          secondary: const Icon(Icons.shield_outlined),
+          title: const Text('Redirect blocker', style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Block known ad domains and stop links that try to open other Android apps.'),
+          activeColor: lime,
+        ),
+      ),
+      Card(
+        child: SwitchListTile(
+          value: keepScreenAwake,
+          onChanged: (value) => _savePlayerSetting('keep_screen_awake', value, () => keepScreenAwake = value),
+          secondary: const Icon(Icons.screen_lock_portrait_outlined),
+          title: const Text('Keep screen awake', style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Prevent the display from sleeping while the player is open.'),
+          activeColor: lime,
+        ),
+      ),
       const SizedBox(height:22),
       const Text('SERVICE STATUS', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:8),
