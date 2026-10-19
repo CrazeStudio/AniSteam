@@ -41,3 +41,22 @@ void main() {
   });
 
 }
+
+  test('watch history preserves its series title and reads older entries', () {
+    const item = Anime(
+      title: 'Episode 4',
+      url: 'https://example.invalid/watch/episode-4',
+      image: 'https://example.invalid/poster.jpg',
+      source: 'ToonStream',
+      seriesTitle: 'Example Anime',
+    );
+    final restored = Anime.fromJson(item.toJson());
+    expect(restored.title, 'Episode 4');
+    expect(restored.seriesTitle, 'Example Anime');
+
+    final legacy = Anime.fromJson({
+      'title': 'Older saved episode',
+      'url': 'https://example.invalid/old-episode',
+    });
+    expect(legacy.seriesTitle, isEmpty);
+  });
