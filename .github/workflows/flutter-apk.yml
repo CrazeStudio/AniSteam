@@ -37,6 +37,16 @@ jobs:
           cache-dependency-path: pubspec.yaml
       - name: Generate Android platform
         run: flutter create --platforms=android --org com.crazestudio --project-name anisteam --no-pub .
+      - name: Ensure Android internet permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="android/app/src/main/AndroidManifest.xml"
+          test -f "$manifest"
+          if ! grep -q 'android.permission.INTERNET' "$manifest"; then
+            sed -i '/<manifest\b/a\    <uses-permission android:name="android.permission.INTERNET" />' "$manifest"
+          fi
+          grep -q 'android.permission.INTERNET' "$manifest"
       - name: Apply AniSteam-2 launcher logo
         shell: bash
         run: |
