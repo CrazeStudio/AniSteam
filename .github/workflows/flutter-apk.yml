@@ -47,7 +47,7 @@ jobs:
             sed -i '/<manifest\b/a\    <uses-permission android:name="android.permission.INTERNET" />' "$manifest"
           fi
           grep -q 'android.permission.INTERNET' "$manifest"
-      - name: Set Android launcher label
+      - name: Set Android launcher label and icon
         shell: bash
         run: |
           set -euo pipefail
@@ -58,6 +58,26 @@ jobs:
               <string name="app_name">AniSteam</string>
           </resources>
           XML
+          manifest="android/app/src/main/AndroidManifest.xml"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s, n = re.subn(r'<application\b', '<application', s, count=1)
+          if not n:
+              raise SystemExit("Android application element not found")
+          s = re.sub(r'android:label="[^"]*"', 'android:label="@string/app_name"', s, count=1)
+          if 'android:label=' not in s:
+              s = s.replace('<application', '<application android:label="@string/app_name"', 1)
+          s = re.sub(r'android:icon="[^"]*"', 'android:icon="@mipmap/ic_launcher"', s, count=1)
+          if 'android:icon=' not in s:
+              s = s.replace('<application', '<application android:icon="@mipmap/ic_launcher"', 1)
+          s = re.sub(r'\s+android:roundIcon="[^"]*"', '', s)
+          p.write_text(s)
+          assert 'android:label="@string/app_name"' in s
+          assert 'android:icon="@mipmap/ic_launcher"' in s
+          PY
           grep -q '<string name="app_name">AniSteam</string>' "$strings"
           test -s .github/assets/launcher/mdpi-ic_launcher.b64
 
