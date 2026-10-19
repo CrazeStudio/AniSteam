@@ -103,8 +103,33 @@ class AniApi {
   static Future<dynamic> details(Anime anime) => get('/details', {'url':anime.url});
   static Future<List<Anime>> episodes(Anime anime) async {
     final source=anime.source.toLowerCase().contains('hianime')?'hianime':'toonstream';
-    return parse(await get('/$source/episodes',{'url':anime.url}),source:anime.source)
-      .asMap().entries.map((e)=>Anime(title:e.value.title=='Untitled'?'Episode ${e.key+1}':e.value.title,url:e.value.url,image:e.value.image,source:anime.source)).toList();
+    final parsed = parse(await get('/$source/episodes',{'url':anime.url}),source:anime.source);
+    if (parsed.isNotEmpty) {
+      return parsed.asMap().entries.map((e)=>Anime(
+        title:e.value.title=='Untitled'?'Episode ${e.key+1}':e.value.title,
+        url:e.value.url,image:e.value.image,source:anime.source,
+      )).toList();
+    }
+
+    // Movies have no episode list. If the source identifies this page as a
+    // movie, expose the movie page itself as the single playable item.
+    final uri = Uri.tryParse(anime.url);
+    final pathLooksLikeMovie = uri != null &&
+        (RegExp(r'/(movie|movies)/', caseSensitive:false).hasMatch(uri.path) ||
+         uri.path.toLowerCase().contains('type-movies'));
+    try {
+      final detail = await details(anime);
+      final kind = (detail is Map ? (detail['kind'] ?? detail['type'] ?? '') : '').toString().toLowerCase();
+      final isMovie = kind == 'movie' || kind == 'film' || pathLooksLikeMovie;
+      if (isMovie) {
+        return [Anime(title:'Movie · ${anime.title}',url:anime.url,image:anime.image,source:anime.source)];
+      }
+    } catch (_) {
+      if (pathLooksLikeMovie) {
+        return [Anime(title:'Movie · ${anime.title}',url:anime.url,image:anime.image,source:anime.source)];
+      }
+    }
+    return [];
   }
   static bool isDirectUrl(String url) {
     final lower = url.toLowerCase();
