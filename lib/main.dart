@@ -404,7 +404,9 @@ class _WatchScreenState extends State<WatchScreen> {
   bool _episodeEndedHandled = false;
 
   String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
+  bool get _toonStreamOnly => (currentEpisode?.source ?? widget.episode.source).toLowerCase().contains('toonstream');
   List<StreamChoice> get _filteredStreams {
+    if (!_toonStreamOnly) return streams;
     final list = streams.where((choice) {
       final text = '${choice.title} ${choice.source} ${choice.url}'.toLowerCase();
       switch (serverFilter) {
@@ -1029,6 +1031,8 @@ class _WatchScreenState extends State<WatchScreen> {
                       ]),
                       if (streams.isEmpty)
                         const Text('No servers returned for this episode.', style: TextStyle(color: Color(0xFF9CA2B0)))
+                      else if (!_toonStreamOnly)
+                        SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: streams.take(3).map((choice) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(selected: choice.url == active?.url, label: Text(choice.title), avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17), onSelected: (_) => _selectStream(choice)))).toList()))
                       else ...[
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
