@@ -247,21 +247,7 @@ class AniApi {
       payload = payload['data'] ?? payload['result'] ?? payload;
     }
     walk(payload);
-    // Some API responses expose only a short-server redirect. Add the supported
-    // Abyss iframe player as a WebView fallback rather than trying to decode it as video.
-    final shortServerFound = out.any((choice) =>
-        choice.isShortLink ||
-        choice.title.toLowerCase().contains('short server') ||
-        choice.title.toLowerCase().contains('abyss'));
-    if (shortServerFound && !seen.contains(abyssIframeUrl)) {
-      out.add(StreamChoice(
-        title: 'Abyss Short Server',
-        url: abyssIframeUrl,
-        source: fallbackSource,
-        type: 'embed',
-        language: 'Default',
-      ));
-    }
+    // Keep the API-provided server named exactly `short`; do not add a duplicate fallback.
     out.sort((a, b) => (b.isDirect ? 1 : 0).compareTo(a.isDirect ? 1 : 0));
     return out;
   }
