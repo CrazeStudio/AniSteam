@@ -572,11 +572,13 @@ class WatchScreen extends StatefulWidget {
     this.playlist = const [],
     this.startIndex = 0,
     this.animeTitle = '',
+    this.onEpisodeChanged,
   });
   final Anime episode;
   final List<Anime> playlist;
   final int startIndex;
   final String animeTitle;
+  final ValueChanged<Anime>? onEpisodeChanged;
   @override State<WatchScreen> createState() => _WatchScreenState();
 }
 
@@ -606,6 +608,30 @@ class _WatchScreenState extends State<WatchScreen> {
   String? errorMessage;
   Timer? hideTimer;
   bool _episodeEndedHandled = false;
+  final Set<String> _attemptedServerUrls = <String>{};
+  final Set<String> _failedServerUrls = <String>{};
+  Duration _lastSavedPosition = Duration.zero;
+
+  String _lastServerKey(Anime episode) => 'anisteam_last_server:${episode.url}';
+  String _progressKey(Anime episode) => 'anisteam_progress:${episode.url}';
+
+  Future<void> _saveLastServer(Anime episode, StreamChoice choice) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lastServerKey(episode), choice.url);
+    } catch (_) {}
+  }
+
+  Future<void> _saveProgress(Anime episode, Duration value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (value <= Duration.zero) {
+        await prefs.remove(_progressKey(episode));
+      } else {
+        await prefs.setInt(_progressKey(episode), value.inMilliseconds);
+      }
+    } catch (_) {}
+  }
 
   String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
   bool get _toonStreamOnly => (currentEpisode?.source ?? widget.episode.source).toLowerCase().contains('toonstream');
@@ -709,6 +735,17 @@ class _WatchScreenState extends State<WatchScreen> {
 
   Future<void> _loadEpisode(Anime episode, {int? index}) async {
     hideTimer?.cancel();
+    _attemptedServerUrls.clear();
+    _failedServerUrls.clear();
+    _lastSavedPosition = Duration.zero;
+    widget.onEpisodeChanged?.call(Anime(
+      title: episode.title,
+      url: episode.url,
+      image: episode.image,
+      description: episode.description,
+      source: episode.source,
+      seriesTitle: widget.animeTitle.isNotEmpty ? widget.animeTitle : episode.seriesTitle,
+    ));
     final old = controller;
     controller = null;
     if (old != null) {
@@ -753,7 +790,18 @@ class _WatchScreenState extends State<WatchScreen> {
         return;
       }
       final pool = preferredPool.isEmpty ? result : preferredPool;
-      final preferred = pool.firstWhere((item) => item.isDirect, orElse: () => pool.first);
+      StreamChoice? remembered;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final lastUrl = prefs.getString(_lastServerKey(episode));
+        for (final option in pool) {
+          if (option.url == lastUrl) {
+            remembered = option;
+            break;
+          }
+        }
+      } catch (_) {}
+      final preferred = remembered ?? pool.firstWhere((item) => item.isDirect, orElse: () => pool.first);
       await _selectStream(preferred);
     } catch (e) {
       if (mounted) {
@@ -766,7 +814,12 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  Future<void> _selectStream(StreamChoice choice) async {
+  Future<void> _selectStream(StreamChoice choice, {bool userInitiated = false}) async {
+    if (userInitiated) {
+      _attemptedServerUrls.remove(choice.url);
+      _failedServerUrls.remove(choice.url);
+    }
+    if (!_attemptedServerUrls.add(choice.url) && !userInitiated) return;
     final old = controller;
     controller = null;
     if (old != null) {
@@ -807,19 +860,87 @@ class _WatchScreenState extends State<WatchScreen> {
         await next.dispose();
         return;
       }
+      final episode = currentEpisode ?? widget.episode;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final savedMs = prefs.getInt(_progressKey(episode)) ?? 0;
+        final savedPosition = Duration(milliseconds: savedMs);
+        if (savedMs > 0 && savedPosition < next.value.duration * .92) {
+          await next.seekTo(savedPosition);
+          _lastSavedPosition = savedPosition;
+        } else if (savedMs > 0) {
+          await prefs.remove(_progressKey(episode));
+        }
+      } catch (_) {}
       next.addListener(_onVideoTick);
       await next.setPlaybackSpeed(speed);
       await next.play();
+      await _saveLastServer(episode, choice);
       setState(() => loadingPlayer = false);
       _scheduleHide();
     } catch (_) {
+      _failedServerUrls.add(choice.url);
+      final failedController = controller;
+      controller = null;
+      if (failedController != null) {
+        try {
+          failedController.removeListener(_onVideoTick);
+          await failedController.dispose();
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           loadingPlayer = false;
-          errorMessage = 'This direct stream could not be played in AniSteam. Try another server or open it in an external player.';
+          errorMessage = 'This server failed. Looking for another available server…';
         });
+        await _tryNextServer();
       }
     }
+  }
+
+  Future<void> _tryNextServer() async {
+    if (!mounted) return;
+    List<StreamChoice> pool = streams;
+    if (_toonStreamOnly && !showAllServers) {
+      final preferred = streams.where(_isPreferredToonStreamServer).toList();
+      if (preferred.isNotEmpty) pool = preferred;
+    }
+    StreamChoice? next;
+    for (final choice in pool) {
+      if (!_attemptedServerUrls.contains(choice.url) && !_failedServerUrls.contains(choice.url)) {
+        next = choice;
+        break;
+      }
+    }
+    if (next == null) {
+      setState(() {
+        loadingPlayer = false;
+        webLoading = false;
+        errorMessage = 'Every available server failed. Refresh the server list or try again later.';
+      });
+      return;
+    }
+    setState(() {
+      active = next;
+      errorMessage = 'Trying another server: ${next.title}';
+      loadingPlayer = next.isDirect;
+      webLoading = !next.isDirect;
+    });
+    await _selectStream(next);
+  }
+
+  Future<void> _handleCurrentServerFailure() async {
+    final failed = active;
+    if (failed == null || !_failedServerUrls.add(failed.url)) return;
+    final old = controller;
+    controller = null;
+    if (old != null) {
+      try {
+        old.removeListener(_onVideoTick);
+        await old.dispose();
+      } catch (_) {}
+    }
+    await _tryNextServer();
   }
 
   void _onVideoTick() {
@@ -827,9 +948,7 @@ class _WatchScreenState extends State<WatchScreen> {
     if (!mounted || c == null || !c.value.isInitialized) return;
     final value = c.value;
     if (value.hasError) {
-      if (errorMessage == null) {
-        setState(() => errorMessage = 'Playback failed for this server. Choose another server or open it externally.');
-      }
+      unawaited(_handleCurrentServerFailure());
       return;
     }
     final ended = value.position >= value.duration && value.duration > Duration.zero;
@@ -837,8 +956,14 @@ class _WatchScreenState extends State<WatchScreen> {
       position = value.position;
       duration = value.duration;
     });
+    final episode = currentEpisode ?? widget.episode;
+    if (!ended && value.position - _lastSavedPosition >= const Duration(seconds: 15)) {
+      _lastSavedPosition = value.position;
+      unawaited(_saveProgress(episode, value.position));
+    }
     if (ended && !_episodeEndedHandled) {
       _episodeEndedHandled = true;
+      unawaited(_saveProgress(episode, Duration.zero));
       if (_hasNext) _playEpisode(currentIndex + 1);
     }
   }
