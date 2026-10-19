@@ -947,9 +947,16 @@ class _WatchScreenState extends State<WatchScreen> {
           return NavigationActionPolicy.CANCEL;
         }
 
-        // Short-link providers often navigate through intermediate hosts.
-        // Keep those redirects inside the WebView, but cancel known ad
-        // destinations at every frame level. Avoid external launch handlers.
+        // For the ToonStream Short player, never let a top-level click or
+        // redirect replace AniSteam's player page with another website.
+        // The provider iframe can still follow its own internal redirect chain
+        // to reach the video player.
+        if (useShortIframe && action.isForMainFrame == true) {
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        // Keep the optional redirect filter independent of the navigation
+        // rule above. Short playback does not require an ad blocker.
         if (redirectBlockerEnabled && _isBlockedRedirectHost(uri.host)) {
           return NavigationActionPolicy.CANCEL;
         }
