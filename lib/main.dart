@@ -871,9 +871,6 @@ class _WatchScreenState extends State<WatchScreen> {
       );
     }
 
-    final isShortPlayback = _toonStreamOnly &&
-        (choice.isShortLink || choice.title.toLowerCase().contains('short') ||
-         choice.title.toLowerCase().contains('abyss'));
     return InAppWebView(
       key: _webViewKey,
       // Load Short/Abyss URLs as the WebView's top-level page. Wrapping a
