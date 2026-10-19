@@ -370,6 +370,8 @@ class _WatchScreenState extends State<WatchScreen> {
   bool loadingPlayer = false;
   bool webLoading = false;
   bool fullscreen = false;
+  bool webFullscreen = false;
+  GlobalKey _webViewKey = GlobalKey();
   bool locked = false;
   bool showControls = true;
   bool externalBusy = false;
@@ -460,6 +462,7 @@ class _WatchScreenState extends State<WatchScreen> {
       await old.dispose();
     }
     webController = null;
+    if (active?.url != choice.url) _webViewKey = GlobalKey();
     if (!mounted) return;
     setState(() {
       active = choice;
@@ -528,6 +531,16 @@ class _WatchScreenState extends State<WatchScreen> {
   Future<void> _playEpisode(int index) async {
     if (!_hasPlaylist || index < 0 || index >= widget.playlist.length) return;
     await _loadEpisode(widget.playlist[index], index: index);
+  }
+
+  Future<void> _reloadPlayback() async {
+    final choice = active;
+    if (choice == null) { await _refreshServers(); return; }
+    if (!choice.isDirect && webController != null) {
+      await webController!.reload();
+    } else {
+      await _selectStream(choice);
+    }
   }
 
   Future<void> _refreshServers() async {
@@ -757,13 +770,15 @@ class _WatchScreenState extends State<WatchScreen> {
     }
 
     return InAppWebView(
-      key: ValueKey<String>(choice.url),
+      key: _webViewKey,
       initialUrlRequest: URLRequest(url: WebUri(choice.url)),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         domStorageEnabled: true,
         databaseEnabled: true,
         mediaPlaybackRequiresUserGesture: false,
+        iframeAllowFullscreen: true,
+        isElementFullscreenEnabled: true,
         allowsInlineMediaPlayback: true,
         mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
         useWideViewPort: true,
@@ -796,11 +811,17 @@ class _WatchScreenState extends State<WatchScreen> {
           });
         }
       },
-      onEnterFullscreen: (web) {
-        if (mounted && !fullscreen) _enterFullscreen();
+      onEnterFullscreen: (web) async {
+        if (!mounted || webFullscreen) return;
+        setState(() => webFullscreen = true);
+        await SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       },
-      onExitFullscreen: (web) {
-        if (mounted && fullscreen) _leaveFullscreen();
+      onExitFullscreen: (web) async {
+        if (!mounted || !webFullscreen) return;
+        setState(() => webFullscreen = false);
+        await SystemChrome.setPreferredOrientations([]);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       },
     );
   }
@@ -927,7 +948,7 @@ class _WatchScreenState extends State<WatchScreen> {
             Text('AniSteam Player', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
           ]),
           actions: [
-            IconButton(tooltip: 'Reload server', onPressed: _refreshServers, icon: const Icon(Icons.refresh_rounded)),
+            IconButton(tooltip: 'Reload player', onPressed: _reloadPlayback, icon: const Icon(Icons.refresh_rounded)),
             IconButton(tooltip: 'Open external player', onPressed: active == null ? null : _openExternal, icon: const Icon(Icons.open_in_new_rounded)),
             IconButton(tooltip: 'Choose server', onPressed: streams.isEmpty ? null : _showServerPicker, icon: const Icon(Icons.dns_rounded)),
             IconButton(tooltip: 'Playback speed', onPressed: active?.isDirect == true ? _showSpeedPicker : null, icon: const Icon(Icons.speed_rounded)),
