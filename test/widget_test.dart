@@ -40,8 +40,6 @@ void main() {
     expect(await AniApi.baseUrl(), defaultApiBase);
   });
 
-}
-
   test('watch history preserves its series title and reads older entries', () {
     const item = Anime(
       title: 'Episode 4',
@@ -60,3 +58,5 @@ void main() {
     });
     expect(legacy.seriesTitle, isEmpty);
   });
+
+}
