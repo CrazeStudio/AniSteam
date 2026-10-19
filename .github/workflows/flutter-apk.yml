@@ -5,6 +5,7 @@ on:
     paths:
       - 'lib/**'
       - 'test/**'
+      - 'tools/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
       - '.github/workflows/flutter-apk.yml'
@@ -12,6 +13,7 @@ on:
     paths:
       - 'lib/**'
       - 'test/**'
+      - 'tools/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
       - '.github/workflows/flutter-apk.yml'
@@ -79,21 +81,15 @@ jobs:
           assert 'android:icon="@mipmap/ic_launcher"' in s
           PY
           grep -q '<string name="app_name">AniSteam</string>' "$strings"
-          test -s .github/assets/launcher/mdpi-ic_launcher.b64
+          test -s tools/generate_launcher_icons.py
 
-      - name: Apply AniSteam-2 launcher logo
+      - name: Generate branded AniSteam launcher icons
         shell: bash
         run: |
           set -euo pipefail
-          res="android/app/src/main/res"
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p "$res/mipmap-$density"
-            for icon in ic_launcher ic_launcher_round; do
-              base64 -d ".github/assets/launcher/$density-$icon.b64" > "$res/mipmap-$density/$icon.webp"
-              rm -f "$res/mipmap-$density/$icon.png"
-            done
-          done
-          rm -f "$res"/mipmap-anydpi-v26/ic_launcher.xml "$res"/mipmap-anydpi-v26/ic_launcher_round.xml
+          python3 -m venv /tmp/anisteam-icon-venv
+          /tmp/anisteam-icon-venv/bin/python -m pip install --quiet --upgrade pip pillow
+          /tmp/anisteam-icon-venv/bin/python tools/generate_launcher_icons.py
       - name: Probe configured API health (diagnostic)
         continue-on-error: true
         run: |
