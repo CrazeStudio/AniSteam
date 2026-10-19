@@ -857,12 +857,34 @@ class _WatchScreenState extends State<WatchScreen> {
       );
     }
 
+    final host = Uri.tryParse(choice.url)?.host.toLowerCase() ?? '';
+    final useShortIframe = _toonStreamOnly &&
+        (choice.title.trim().toLowerCase() == 'short' ||
+         choice.isShortLink || host == 'abyssplayer.com' ||
+         host == 'www.abyssplayer.com');
+    final escapedSrc = choice.url
+        .replaceAll('&', '&amp;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    final shortIframeHtml = '<!doctype html><html><head>'
+        '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
+        '<style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}'
+        'iframe{border:0;width:100vw;height:100vh;display:block}</style>'
+        '</head><body><iframe width="640" height="360" src="$escapedSrc" '
+        'frameborder="0" scrolling="0" allowfullscreen></iframe></body></html>';
+
     return InAppWebView(
       key: _webViewKey,
-      // Load Short/Abyss URLs as the WebView's top-level page. Wrapping a
-      // redirect URL in an iframe can strand its final player or trigger
-      // pop-up redirect behavior that the outer page cannot manage.
-      initialUrlRequest: URLRequest(url: WebUri(choice.url)),
+      // Only the ToonStream short provider uses the supplied iframe HTML.
+      // Other providers continue loading their own URLs directly.
+      initialData: useShortIframe
+          ? InAppWebViewInitialData(
+              data: shortIframeHtml,
+              baseUrl: WebUri(Uri.tryParse(choice.url)?.origin ?? 'https://abyssplayer.com'),
+            )
+          : null,
+      initialUrlRequest: useShortIframe ? null : URLRequest(url: WebUri(choice.url)),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         domStorageEnabled: true,
