@@ -762,6 +762,7 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   Future<void> _showServerPicker() async {
+    final visibleServers = _filteredStreams;
     final selected = await showModalBottomSheet<StreamChoice>(
       context: context,
       isScrollControlled: true,
@@ -778,10 +779,10 @@ class _WatchScreenState extends State<WatchScreen> {
             const SizedBox(height: 12),
             Flexible(child: ListView.separated(
               shrinkWrap: true,
-              itemCount: streams.length,
+              itemCount: visibleServers.length,
               separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFF292D38)),
               itemBuilder: (context, index) {
-                final item = streams[index];
+                final item = visibleServers[index];
                 return ListTile(
                   leading: Icon(item.isDirect ? Icons.play_circle_fill_rounded : Icons.language_rounded, color: item.url == active?.url ? lime : const Color(0xFF9CA2B0), size: 29),
                   title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
