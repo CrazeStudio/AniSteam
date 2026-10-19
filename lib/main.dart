@@ -383,6 +383,7 @@ class _WatchScreenState extends State<WatchScreen> {
   Anime? currentEpisode;
   int currentIndex = 0;
   List<StreamChoice> streams = [];
+  String serverFilter = 'All';
   StreamChoice? active;
   VideoPlayerController? controller;
   InAppWebViewController? webController;
@@ -403,6 +404,23 @@ class _WatchScreenState extends State<WatchScreen> {
   bool _episodeEndedHandled = false;
 
   String get _animeTitle => widget.animeTitle.isNotEmpty ? widget.animeTitle : (currentEpisode?.title ?? 'AniSteam');
+  List<StreamChoice> get _filteredStreams {
+    final list = streams.where((choice) {
+      final text = '${choice.title} ${choice.source} ${choice.url}'.toLowerCase();
+      switch (serverFilter) {
+        case 'Moly':
+          return text.contains('moly');
+        case 'Short':
+          return choice.isShortLink || text.contains('short') || text.contains('abyss');
+        case 'Play':
+          return choice.isDirect || text.contains('play') || text.contains('stream') || text.contains('video');
+        default:
+          return true;
+      }
+    }).toList();
+    // Keep the selector compact: at most three servers are shown per category.
+    return list.take(3).toList();
+  }
   bool get _hasPlaylist => widget.playlist.isNotEmpty;
   bool get _hasPrevious => _hasPlaylist && currentIndex > 0;
   bool get _hasNext => _hasPlaylist && currentIndex < widget.playlist.length - 1;
@@ -1011,17 +1029,44 @@ class _WatchScreenState extends State<WatchScreen> {
                       ]),
                       if (streams.isEmpty)
                         const Text('No servers returned for this episode.', style: TextStyle(color: Color(0xFF9CA2B0)))
-                      else
-                        SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: streams.map((choice) =>
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              selected: choice.url == active?.url,
-                              label: Text(choice.title),
-                              avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17),
-                              onSelected: (_) => _selectStream(choice),
-                            ),
-                          )).toList())),
+                      else ...[
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(children: ['All', 'Moly', 'Short', 'Play'].map((filter) =>
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                selected: serverFilter == filter,
+                                label: Text(filter == 'All' ? 'All servers' : filter),
+                                onSelected: (_) => setState(() => serverFilter = filter),
+                              ),
+                            )).toList()),
+                        ),
+                        const SizedBox(height: 10),
+                        Builder(builder: (context) {
+                          final visibleServers = _filteredStreams;
+                          if (visibleServers.isEmpty) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: Text('No ${serverFilter == 'All' ? '' : '$serverFilter '}servers found. Try another filter.',
+                                style: const TextStyle(color: Color(0xFF9CA2B0))),
+                            );
+                          }
+                          return SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(children: visibleServers.map((choice) =>
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                  selected: choice.url == active?.url,
+                                  label: Text(choice.title),
+                                  avatar: Icon(choice.isDirect ? Icons.play_arrow_rounded : Icons.language_rounded, size: 17),
+                                  onSelected: (_) => _selectStream(choice),
+                                ),
+                              )).toList()),
+                          );
+                        }),
+                      ],
                       const SizedBox(height: 16),
                       Card(child: Padding(
                         padding: const EdgeInsets.all(14),
