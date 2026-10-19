@@ -1269,6 +1269,29 @@ class _SettingsTabState extends State<SettingsTab> {
           onChanged: (value) { if (value != null) widget.onMode(value); },
         )),
       const SizedBox(height:22),
+      const Text('SERVICE STATUS', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+      const SizedBox(height:8),
+      const Text('The service connection is managed privately by AniSteam. Its server address is not shown or editable here.', style: TextStyle(color: Color(0xFF9CA2B0), height: 1.45)),
+      const SizedBox(height:12),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: checking ? null : checkConnection,
+          icon: checking
+            ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2))
+            : const Icon(Icons.wifi_tethering_rounded),
+          label: Text(checking ? 'Checking…' : 'Check connection'),
+        ),
+      ),
+      if (connectionStatus != null)
+        Padding(
+          padding: const EdgeInsets.only(top:12),
+          child: Text(connectionStatus!, style: TextStyle(
+            color: connectionStatus!.startsWith('Connected') ? lime : const Color(0xFFFFB86B),
+            height:1.4,
+          )),
+        ),
+      const SizedBox(height:22),
       const Text('PLAYER PREFERENCES', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:10),
       Card(
@@ -1301,29 +1324,6 @@ class _SettingsTabState extends State<SettingsTab> {
           activeColor: lime,
         ),
       ),
-      const SizedBox(height:22),
-      const Text('SERVICE STATUS', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
-      const SizedBox(height:8),
-      const Text('The service connection is managed privately by AniSteam. Its server address is not shown or editable here.', style: TextStyle(color: Color(0xFF9CA2B0), height: 1.45)),
-      const SizedBox(height:12),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: checking ? null : checkConnection,
-          icon: checking
-            ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2))
-            : const Icon(Icons.wifi_tethering_rounded),
-          label: Text(checking ? 'Checking…' : 'Check connection'),
-        ),
-      ),
-      if (connectionStatus != null)
-        Padding(
-          padding: const EdgeInsets.only(top:12),
-          child: Text(connectionStatus!, style: TextStyle(
-            color: connectionStatus!.startsWith('Connected') ? lime : const Color(0xFFFFB86B),
-            height:1.4,
-          )),
-        ),
       const SizedBox(height:22),
       const Text('ABOUT', style: TextStyle(color: Color(0xFF9CA2B0), fontWeight: FontWeight.w800, letterSpacing: 1.4)),
       const SizedBox(height:10),
