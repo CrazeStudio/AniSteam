@@ -204,7 +204,6 @@ class AniApi {
   static List<StreamChoice> _parseStreams(dynamic raw, String fallbackSource) {
     final out = <StreamChoice>[];
     final seen = <String>{};
-    const abyssIframeUrl = 'https://player.abyssplayer.com/dqvi26UZ6';
     final excluded = {'poster', 'poster_image', 'image', 'thumbnail', 'thumbnail_image', 'cover', 'description'};
     const urlKeys = ['url', 'link', 'src', 'file', 'embed_url', 'embed', 'stream_url', 'streamUrl'];
     String textValue(dynamic value) {
@@ -917,7 +916,8 @@ class _WatchScreenState extends State<WatchScreen> {
         break;
       }
     }
-    if (next == null) {
+    final nextChoice = next;
+    if (nextChoice == null) {
       setState(() {
         loadingPlayer = false;
         webLoading = false;
@@ -926,12 +926,12 @@ class _WatchScreenState extends State<WatchScreen> {
       return;
     }
     setState(() {
-      active = next;
-      errorMessage = 'Trying another server: ${next.title}';
-      loadingPlayer = next.isDirect;
-      webLoading = !next.isDirect;
+      active = nextChoice;
+      errorMessage = 'Trying another server: ${nextChoice.title}';
+      loadingPlayer = nextChoice.isDirect;
+      webLoading = !nextChoice.isDirect;
     });
-    await _selectStream(next);
+    await _selectStream(nextChoice);
   }
 
   Future<void> _handleCurrentServerFailure() async {
