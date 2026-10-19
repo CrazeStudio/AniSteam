@@ -276,6 +276,8 @@ class StreamChoice {
   String get playbackKind => isDirect ? 'Direct video' : (isShortLink ? 'Short-link web player' : 'Embedded web player');
 }
 
+
+
 class AppShell extends StatefulWidget { const AppShell({super.key}); @override State<AppShell> createState()=>_AppShellState(); }
 class _AppShellState extends State<AppShell> {
   int tab=0; String sourceMode='COMBINED';
@@ -344,7 +346,9 @@ class _DetailsScreenState extends State<DetailsScreen>{
  const SizedBox(height:18),Text(widget.anime.title,style:const TextStyle(fontSize:26,fontWeight:FontWeight.w900)),const SizedBox(height:8),Text(widget.anime.source,style:const TextStyle(color:lime,fontWeight:FontWeight.w800,letterSpacing:1)),
  const SizedBox(height:12),FutureBuilder<dynamic>(future:details,builder:(context,snap){final d=widget.anime.description.isNotEmpty?widget.anime.description:findDescription(snap.data);return Text(d.isEmpty?'Choose an episode below to continue.':d,style:const TextStyle(color:Color(0xFFB0B5C1),height:1.5));}),
  const SizedBox(height:24),const Text('EPISODES',style:TextStyle(fontWeight:FontWeight.w900,letterSpacing:1.5)),const SizedBox(height:10),
- FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){widget.onWatch(e.value);Navigator.push(context,MaterialPageRoute(builclass WatchScreen extends StatefulWidget {
+ FutureBuilder<List<Anime>>(future:episodes,builder:(context,snap){if(snap.connectionState==ConnectionState.waiting)return const Padding(padding:EdgeInsets.all(25),child:Center(child:CircularProgressIndicator()));if(snap.hasError)return ErrorView(message:snap.error.toString(),retry:()=>setState(()=>episodes=AniApi.episodes(widget.anime)));final list=snap.data??[];if(list.isEmpty)return const EmptyView(title:'No episodes found',message:'The selected source returned no episode links.');return Column(children:list.asMap().entries.map((e)=>Card(child:ListTile(leading:CircleAvatar(backgroundColor:lime.withValues(alpha:.13),child:Text('${e.key+1}',style:const TextStyle(color:lime,fontWeight:FontWeight.w900))),title:Text(e.value.title,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.play_arrow_rounded,color:lime),onTap:(){widget.onWatch(e.value);Navigator.push(context,MaterialPageRoute(builder:(_)=>WatchScreen(episode:e.value,playlist:list,startIndex:e.key,animeTitle:widget.anime.title)));}))).toList());})
+ ]));}
+class WatchScreen extends StatefulWidget {
   const WatchScreen({
     super.key,
     required this.episode,
@@ -1038,7 +1042,6 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 }
 
-on:Icon(c.value.isPlaying?Icons.pause_rounded:Icons.play_arrow_rounded)),VideoProgressIndicator(c,allowScrubbing:true)])));}}
 class HistoryTab extends StatelessWidget {const HistoryTab({super.key,required this.items,required this.onClear,required this.onOpen});final List<Anime> items;final VoidCallback onClear;final ValueChanged<Anime> onOpen;@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Watch history',style:TextStyle(fontWeight:FontWeight.w900)),actions:[IconButton(onPressed:items.isEmpty?null:onClear,icon:const Icon(Icons.delete_sweep_rounded))]),body:items.isEmpty?const EmptyView(title:'Nothing watched yet',message:'Episodes you open will be saved here on this device.'):ListView.builder(itemCount:items.length,itemBuilder:(context,i){final a=items[i];return ListTile(leading:const Icon(Icons.history_rounded,color:lime),title:Text(a.title,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(a.source),trailing:const Icon(Icons.chevron_right_rounded),onTap:()=>onOpen(a));}));}
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key, required this.sourceMode, required this.onMode});
