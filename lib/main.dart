@@ -149,6 +149,7 @@ class AniApi {
   static List<StreamChoice> _parseStreams(dynamic raw, String fallbackSource) {
     final out = <StreamChoice>[];
     final seen = <String>{};
+    const abyssIframeUrl = 'https://player.abyssplayer.com/dqvi26UZ6';
     final excluded = {'poster', 'poster_image', 'image', 'thumbnail', 'thumbnail_image', 'cover', 'description'};
     const urlKeys = ['url', 'link', 'src', 'file', 'embed_url', 'embed', 'stream_url', 'streamUrl'];
     String textValue(dynamic value) {
@@ -245,6 +246,21 @@ class AniApi {
       payload = payload['data'] ?? payload['result'] ?? payload;
     }
     walk(payload);
+    // Some API responses expose only a short-server redirect. Add the supported
+    // Abyss iframe player as a WebView fallback rather than trying to decode it as video.
+    final shortServerFound = out.any((choice) =>
+        choice.isShortLink ||
+        choice.title.toLowerCase().contains('short server') ||
+        choice.title.toLowerCase().contains('abyss'));
+    if (shortServerFound && !seen.contains(abyssIframeUrl)) {
+      out.add(StreamChoice(
+        title: 'Abyss Short Server',
+        url: abyssIframeUrl,
+        source: fallbackSource,
+        type: 'embed',
+        language: 'Default',
+      ));
+    }
     out.sort((a, b) => (b.isDirect ? 1 : 0).compareTo(a.isDirect ? 1 : 0));
     return out;
   }
@@ -773,9 +789,12 @@ class _WatchScreenState extends State<WatchScreen> {
       );
     }
 
+    final useAbyssIframe = choice.url == 'https://player.abyssplayer.com/dqvi26UZ6';
+    const abyssIframeHtml = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe width="640" height="360" src="https://player.abyssplayer.com/dqvi26UZ6" frameborder="0" scrolling="0" allowfullscreen style="border:0;width:100vw;height:100vh;display:block"></iframe></body></html>';
     return InAppWebView(
       key: _webViewKey,
-      initialUrlRequest: URLRequest(url: WebUri(choice.url)),
+      initialData: useAbyssIframe ? InAppWebViewInitialData(data: abyssIframeHtml, baseUrl: WebUri('https://player.abyssplayer.com/')) : null,
+      initialUrlRequest: useAbyssIframe ? null : URLRequest(url: WebUri(choice.url)),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         domStorageEnabled: true,
