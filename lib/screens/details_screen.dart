@@ -24,7 +24,7 @@ class DetailsScreen extends StatefulWidget {
 }
 
 class _DetailsScreenState extends State<DetailsScreen> {
-  static const double _expandedHeight = 360;
+  static const double _expandedHeight = 300;
 
   late Future<List<Anime>> episodes = AniApi.episodes(widget.anime);
   late Future<dynamic> details = AniApi.details(widget.anime);
@@ -222,9 +222,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
           // Blurred backdrop that zooms slightly as the header collapses.
           Positioned.fill(
             child: Transform.scale(
-              scale: 1.15 + 0.1 * t,
+              scale: 1.08 + 0.06 * t,
               child: ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22, tileMode: TileMode.clamp),
+                imageFilter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16, tileMode: TileMode.clamp),
                 child: PosterImage(url: widget.anime.image, cacheWidth: 360),
               ),
             ),
@@ -235,8 +235,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Color(0x990B0D12), Color(0x330B0D12), bg],
-                  stops: [0, .45, 1],
+                  colors: [Color(0xCC0B0D12), Color(0x880B0D12), bg, bg],
+                  stops: [0, .34, .78, 1],
                 ),
               ),
             ),
@@ -270,8 +270,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 offset: Offset(0, (1 - t) * 24),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   SizedBox(
-                    width: 124,
-                    height: 186,
+                    width: 112,
+                    height: 168,
                     child: Hero(
                       tag: tag,
                       child: Container(
@@ -305,7 +305,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       Text(widget.anime.title,
                           maxLines: 4,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w900, height: 1.1)),
+                          style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900, height: 1.1)),
                     ]),
                   ),
                 ]),
